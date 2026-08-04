@@ -89,6 +89,7 @@ var (
 	rejectRe  = regexp.MustCompile(`reject:\s*([^;]*)`)
 	clientRe  = regexp.MustCompile(`client=\S+\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
 	bracketIP = regexp.MustCompile(`\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
+	subjectRe = regexp.MustCompile(`warning: header Subject: (.*?) from \S+\[[0-9.]+\];`)
 )
 
 func extract(re *regexp.Regexp, line string) string {
@@ -117,6 +118,18 @@ func fromWithIP(from, ip string) string {
 	return fmt.Sprintf("%s (%s)", from, ip)
 }
 
+// withSubject appends a truncated [Subject] suffix when known.
+func withSubject(text, subject string) string {
+	if subject == "" {
+		return text
+	}
+	const maxLen = 60
+	if len(subject) > maxLen {
+		subject = subject[:maxLen] + "…"
+	}
+	return fmt.Sprintf("%s [%s]", text, subject)
+}
+
 // processLine parses one mail.log line into an Event. Postfix logs a
 // message's from=, client IP, and eventual to=/status= on separate lines
 // that share only a Queue-ID, so qidFrom/qidIP correlate them across lines.
@@ -132,14 +145,19 @@ func (m *model) processLine(line string) *Event {
 		if cm := clientRe.FindStringSubmatch(rest); cm != nil {
 			m.qidIP[qid] = cm[1]
 		}
+		if sm := subjectRe.FindStringSubmatch(rest); sm != nil {
+			m.qidSubject[qid] = sm[1]
+		}
 		if strings.Contains(rest, ": removed") || rest == "removed" {
 			delete(m.qidFrom, qid)
 			delete(m.qidIP, qid)
+			delete(m.qidSubject, qid)
 			return nil
 		}
 		if len(m.qidFrom) > 20000 {
 			m.qidFrom = make(map[string]string)
 			m.qidIP = make(map[string]string)
+			m.qidSubject = make(map[string]string)
 		}
 
 		to := extract(toRe, rest)
@@ -151,19 +169,20 @@ func (m *model) processLine(line string) *Event {
 			from = "-"
 		}
 		fromDisplay := fromWithIP(from, m.qidIP[qid])
+		subject := m.qidSubject[qid]
 
 		switch {
 		case strings.Contains(rest, "status=bounced"):
 			return &Event{Time: now, Type: EventBounce, Raw: line,
-				Text: fmt.Sprintf("%s → %s", fromDisplay, to)}
+				Text: withSubject(fmt.Sprintf("%s → %s", fromDisplay, to), subject)}
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			if isLocalRelay(relay) {
 				return &Event{Time: now, Type: EventRecv, Raw: line,
-					Text: fmt.Sprintf("%s → %s", fromDisplay, to)}
+					Text: withSubject(fmt.Sprintf("%s → %s", fromDisplay, to), subject)}
 			}
 			return &Event{Time: now, Type: EventSent, Raw: line,
-				Text: fmt.Sprintf("%s → %s via %s", fromDisplay, to, relay)}
+				Text: withSubject(fmt.Sprintf("%s → %s via %s", fromDisplay, to, relay), subject)}
 		}
 		return nil
 	}
@@ -335,8 +354,9 @@ type model struct {
 	help    help.Model
 	showAll bool
 
-	qidFrom map[string]string
-	qidIP   map[string]string
+	qidFrom    map[string]string
+	qidIP      map[string]string
+	qidSubject map[string]string
 }
 
 func initialModel() model {
@@ -363,6 +383,7 @@ func initialModel() model {
 		help:        h,
 		qidFrom:     make(map[string]string),
 		qidIP:       make(map[string]string),
+		qidSubject:  make(map[string]string),
 	}
 }
 
