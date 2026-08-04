@@ -213,15 +213,15 @@ func (m *model) processLine(line string) *Event {
 		switch {
 		case strings.Contains(rest, "status=bounced"):
 			return &Event{Time: now, Type: EventBounce, Raw: line,
-				Text: withSubject(fmt.Sprintf("%s → %s", fromDisplay, to), subject)}
+				Text: withSubject(fmt.Sprintf("발신: %s\n수신: %s", fromDisplay, to), subject)}
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			if isLocalRelay(relay) {
 				return &Event{Time: now, Type: EventRecv, Raw: line,
-					Text: withSubject(fmt.Sprintf("%s → %s", fromDisplay, to), subject)}
+					Text: withSubject(fmt.Sprintf("발신: %s\n수신: %s", fromDisplay, to), subject)}
 			}
 			return &Event{Time: now, Type: EventSent, Raw: line,
-				Text: withSubject(fmt.Sprintf("%s → %s via %s", fromDisplay, to, relay), subject)}
+				Text: withSubject(fmt.Sprintf("발신: %s\n수신: %s (via %s)", fromDisplay, to, relay), subject)}
 		}
 		return nil
 	}
@@ -241,7 +241,7 @@ func (m *model) processLine(line string) *Event {
 			ip = im[1]
 		}
 		return &Event{Time: now, Type: EventReject, Raw: line,
-			Text: fmt.Sprintf("%s → %s (%s)", fromWithIP(from, ip), to, reason)}
+			Text: fmt.Sprintf("발신: %s\n수신: %s (%s)", fromWithIP(from, ip), to, reason)}
 	}
 	return nil
 }
@@ -698,6 +698,12 @@ func justify(width int, left, right string) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
+// continuationIndent aligns wrapped lines (e.g. the "수신:" line of a
+// multi-line RECV/SENT/BOUNCE/REJECT event) under the text column, matching
+// the plain-text width of "▎ 15:04:05 🔐 LOGIN  " (bar, time, icon, padded
+// label, separators).
+const continuationIndent = "                     "
+
 func renderEvents(events []Event, width int) string {
 	if len(events) == 0 {
 		return dimStyle.Render("  … 이벤트 대기 중 (mail.log 감시 중) …")
@@ -706,10 +712,13 @@ func renderEvents(events []Event, width int) string {
 	for i, e := range events {
 		style := lipgloss.NewStyle().Foreground(eventColor[e.Type])
 		bar := style.Render("▎")
-		line := fmt.Sprintf("%s %s %s %-6s %s",
+		lines := strings.Split(e.Text, "\n")
+		b.WriteString(fmt.Sprintf("%s %s %s %-6s %s",
 			bar, dimStyle.Render(e.Time.Format("15:04:05")), e.Type.Icon(),
-			style.Bold(true).Render(e.Type.Label()), e.Text)
-		b.WriteString(line)
+			style.Bold(true).Render(e.Type.Label()), lines[0]))
+		for _, l := range lines[1:] {
+			b.WriteString("\n" + continuationIndent + l)
+		}
 		if i < len(events)-1 {
 			b.WriteString("\n")
 		}
