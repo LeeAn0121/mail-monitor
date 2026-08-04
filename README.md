@@ -82,12 +82,23 @@ export MAIL_MONITOR_DB_DSN="user:password@tcp(127.0.0.1:3306)/dbname?timeout=2s"
 mail-monitor
 ```
 
-환경변수 없으면 조회 기능 자체가 비활성화되고(연결 시도 안 함) 이메일 원문 그대로 표시된다.
-DB가 죽어있거나 DSN이 틀려도 앱은 정상 기동하고 그냥 조회를 건너뛴다 — 시작 시 최대 2초
-연결 시도 지연만 있음.
+매번 export 하기 귀찮으면 `.env` 파일로 관리 가능. 아래 순서로 찾아서 읽는다 (먼저 찾은 것만 사용):
 
-systemd 서비스로 상시 실행한다면 `Environment=` 또는 `EnvironmentFile=`로 넣는 걸 추천
-(쉘 히스토리/프로세스 목록에 비밀번호 안 남음).
+1. `/etc/mail-monitor/.env` — 시스템 전역 (systemd/상시 실행 추천)
+2. `./.env` — 실행 디렉토리 기준 (로컬 테스트용)
+
+```bash
+sudo mkdir -p /etc/mail-monitor
+echo 'MAIL_MONITOR_DB_DSN=user:password@tcp(127.0.0.1:3306)/dbname?timeout=2s' | sudo tee /etc/mail-monitor/.env
+sudo chmod 600 /etc/mail-monitor/.env
+```
+
+이미 환경변수로 `MAIL_MONITOR_DB_DSN`이 설정돼 있으면 `.env` 값은 무시된다(환경변수 우선).
+`.env`는 절대 커밋하지 말 것 — `.gitignore`에 이미 등록돼 있음.
+
+환경변수/`.env` 둘 다 없으면 조회 기능 자체가 비활성화되고(연결 시도 안 함) 이메일 원문
+그대로 표시된다. DB가 죽어있거나 DSN이 틀려도 앱은 정상 기동하고 그냥 조회를 건너뛴다 —
+시작 시 최대 2초 연결 시도 지연만 있음.
 
 ## 키보드 단축키
 

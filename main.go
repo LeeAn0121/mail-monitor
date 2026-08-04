@@ -19,6 +19,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/joho/godotenv"
 )
 
 var version = "dev"
@@ -719,11 +720,28 @@ func (m model) View() string {
 	return b.String()
 }
 
+// envFilePaths lists .env locations in priority order: a system-wide file
+// for service deployments, then the current directory for local runs.
+var envFilePaths = []string{"/etc/mail-monitor/.env", ".env"}
+
+// loadEnvFile loads the first .env file found. godotenv.Load never
+// overwrites variables already set in the process environment.
+func loadEnvFile() {
+	for _, path := range envFilePaths {
+		if _, err := os.Stat(path); err == nil {
+			godotenv.Load(path)
+			return
+		}
+	}
+}
+
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
 		fmt.Println("mail-monitor " + version)
 		return
 	}
+
+	loadEnvFile()
 
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
