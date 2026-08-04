@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"fmt"
@@ -9,7 +10,10 @@ import (
 	"mime"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,10 +63,29 @@ func (e EventType) Label() string {
 }
 
 type Event struct {
-	Time time.Time
+	When string // e.g. "08-04 15:34:59", taken from the log line itself
 	Type EventType
 	Text string
 	Raw  string
+}
+
+// syslogTsRe captures a line's leading syslog timestamp ("Aug  4 15:34:59").
+var syslogTsRe = regexp.MustCompile(`^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})`)
+
+// extractWhen reads the real timestamp off the log line rather than using
+// wall-clock time, so history search results (which can be processed long
+// after the fact, from rotated files spanning many days) show when the
+// event actually happened, not when mail-monitor happened to read it.
+func extractWhen(line string) string {
+	m := syslogTsRe.FindStringSubmatch(line)
+	if m == nil {
+		return time.Now().Format("01-02 15:04:05")
+	}
+	t, err := time.Parse("Jan _2 15:04:05", m[1])
+	if err != nil {
+		return time.Now().Format("01-02 15:04:05")
+	}
+	return t.Format("01-02 15:04:05")
 }
 
 var (
@@ -156,7 +179,7 @@ func withSubject(text, subject string) string {
 // message's from=, client IP, and eventual to=/status= on separate lines
 // that share only a Queue-ID, so qidFrom/qidIP correlate them across lines.
 func (m *model) processLine(line string) *Event {
-	now := time.Now()
+	when := extractWhen(line)
 
 	if qm := qidLineRe.FindStringSubmatch(line); qm != nil {
 		qid, rest := qm[1], qm[2]
@@ -196,15 +219,15 @@ func (m *model) processLine(line string) *Event {
 
 		switch {
 		case strings.Contains(rest, "status=bounced"):
-			return &Event{Time: now, Type: EventBounce, Raw: line,
+			return &Event{When: when, Type: EventBounce, Raw: line,
 				Text: withSubject(fmt.Sprintf("발신: %s\n수신: %s", fromDisplay, to), subject)}
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			if isLocalRelay(relay) {
-				return &Event{Time: now, Type: EventRecv, Raw: line,
+				return &Event{When: when, Type: EventRecv, Raw: line,
 					Text: withSubject(fmt.Sprintf("발신: %s\n수신: %s", fromDisplay, to), subject)}
 			}
-			return &Event{Time: now, Type: EventSent, Raw: line,
+			return &Event{When: when, Type: EventSent, Raw: line,
 				Text: withSubject(fmt.Sprintf("발신: %s\n수신: %s (via %s)", fromDisplay, to, relay), subject)}
 		}
 		return nil
@@ -214,7 +237,7 @@ func (m *model) processLine(line string) *Event {
 	case loginRe.MatchString(line):
 		user := m.addr(extract(userRe, line))
 		rip := extract(ripRe, line)
-		return &Event{Time: now, Type: EventLogin, Raw: line,
+		return &Event{When: when, Type: EventLogin, Raw: line,
 			Text: fmt.Sprintf("%s from %s", user, rip)}
 	case strings.Contains(line, "reject:"):
 		from := m.addr(extract(fromRe, line))
@@ -224,7 +247,7 @@ func (m *model) processLine(line string) *Event {
 		if im := bracketIP.FindStringSubmatch(line); im != nil {
 			ip = im[1]
 		}
-		return &Event{Time: now, Type: EventReject, Raw: line,
+		return &Event{When: when, Type: EventReject, Raw: line,
 			Text: fmt.Sprintf("발신: %s\n수신: %s (%s)", fromWithIP(from, ip), to, reason)}
 	}
 	return nil
@@ -330,6 +353,130 @@ func startTail(ch chan<- string, errCh chan<- error) {
 	subprocessTail(ch, errCh)
 }
 
+// --- history search (scans logPath + rotated logs on disk) ---
+
+const maxHistoryResults = 3000
+
+var rotatedSuffixRe = regexp.MustCompile(`\.(\d+)(\.gz)?$`)
+
+// listRotatedLogs returns logPath and any logrotate-style rotated
+// siblings (mail.log.1, mail.log.2.gz, ...), oldest first, current
+// logPath last — chronological order for search results.
+func listRotatedLogs() []string {
+	matches, _ := filepath.Glob(logPath + ".*")
+	type entry struct {
+		path string
+		n    int
+	}
+	var entries []entry
+	for _, p := range matches {
+		m := rotatedSuffixRe.FindStringSubmatch(p)
+		if m == nil {
+			continue
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		entries = append(entries, entry{p, n})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].n > entries[j].n })
+
+	files := make([]string, 0, len(entries)+1)
+	for _, e := range entries {
+		files = append(files, e.path)
+	}
+	if _, err := os.Stat(logPath); err == nil {
+		files = append(files, logPath)
+	}
+	return files
+}
+
+// scanFile reads path line by line, transparently decompressing .gz.
+func scanFile(path string, fn func(line string)) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var r io.Reader = f
+	if strings.HasSuffix(path, ".gz") {
+		gz, err := gzip.NewReader(f)
+		if err != nil {
+			return err
+		}
+		defer gz.Close()
+		r = gz
+	}
+
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		fn(scanner.Text())
+	}
+	return scanner.Err()
+}
+
+type historyResultsMsg struct {
+	query  string
+	events []Event
+	err    error
+}
+
+// searchHistory scans logPath and its rotated siblings for events matching
+// query, using a correlation state independent of the live model's (own
+// qidFrom/qidIP/qidSubject/nameCache) so it can run concurrently on its own
+// goroutine without racing the live view. It shares the *sql.DB handle,
+// which is safe for concurrent use.
+func searchHistory(db *sql.DB, query string) historyResultsMsg {
+	sm := &model{
+		qidFrom:    make(map[string]string),
+		qidIP:      make(map[string]string),
+		qidSubject: make(map[string]string),
+		nameCache:  make(map[string]string),
+		db:         db,
+	}
+
+	needle := strings.ToLower(query)
+	var results []Event
+	var lastErr error
+	opened := 0
+
+	for _, path := range listRotatedLogs() {
+		err := scanFile(path, func(line string) {
+			ev := sm.processLine(line)
+			if ev == nil {
+				return
+			}
+			if needle != "" && !strings.Contains(strings.ToLower(ev.Raw), needle) &&
+				!strings.Contains(strings.ToLower(ev.Text), needle) {
+				return
+			}
+			results = append(results, *ev)
+			if len(results) > maxHistoryResults {
+				results = results[1:]
+			}
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		opened++
+	}
+
+	if opened == 0 && lastErr != nil {
+		return historyResultsMsg{query: query, err: lastErr}
+	}
+	return historyResultsMsg{query: query, events: results}
+}
+
+func searchHistoryCmd(db *sql.DB, query string) tea.Cmd {
+	return func() tea.Msg {
+		return searchHistory(db, query)
+	}
+}
+
 func waitForLine(ch <-chan string) tea.Cmd {
 	return func() tea.Msg {
 		return logLineMsg(<-ch)
@@ -402,39 +549,41 @@ func (m *model) addr(email string) string {
 // --- keymap ---
 
 type keyMap struct {
-	Filter key.Binding
-	Toggle key.Binding
-	Pause  key.Binding
-	Clear  key.Binding
-	Bottom key.Binding
-	Up     key.Binding
-	Down   key.Binding
-	Help   key.Binding
-	Quit   key.Binding
+	Filter  key.Binding
+	History key.Binding
+	Toggle  key.Binding
+	Pause   key.Binding
+	Clear   key.Binding
+	Bottom  key.Binding
+	Up      key.Binding
+	Down    key.Binding
+	Help    key.Binding
+	Quit    key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Filter, k.Toggle, k.Pause, k.Help, k.Quit}
+	return []key.Binding{k.Filter, k.History, k.Toggle, k.Pause, k.Help, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Filter, k.Toggle, k.Pause, k.Clear},
+		{k.Filter, k.History, k.Toggle, k.Pause, k.Clear},
 		{k.Up, k.Down, k.Bottom},
 		{k.Help, k.Quit},
 	}
 }
 
 var keys = keyMap{
-	Filter: key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "필터/검색")),
-	Toggle: key.NewBinding(key.WithKeys("1", "2", "3", "4", "5"), key.WithHelp("1-5", "이벤트 토글")),
-	Pause:  key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "정지/재개")),
-	Clear:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "클리어")),
-	Bottom: key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "최신으로")),
-	Up:     key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "스크롤")),
-	Down:   key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "스크롤")),
-	Help:   key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "도움말")),
-	Quit:   key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "종료")),
+	Filter:  key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "필터(버퍼)")),
+	History: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "이력 검색")),
+	Toggle:  key.NewBinding(key.WithKeys("1", "2", "3", "4", "5"), key.WithHelp("1-5", "이벤트 토글")),
+	Pause:   key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "정지/재개")),
+	Clear:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "클리어")),
+	Bottom:  key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "최신으로")),
+	Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "스크롤")),
+	Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "스크롤")),
+	Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "도움말")),
+	Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "종료")),
 }
 
 // --- model ---
@@ -468,13 +617,26 @@ type model struct {
 
 	db        *sql.DB
 	nameCache map[string]string
+
+	hsInput   textinput.Model
+	hsTyping  bool
+	hsActive  bool
+	hsLoading bool
+	hsQuery   string
+	hsResults []Event
+	hsErr     error
 }
 
 func initialModel() model {
 	ti := textinput.New()
 	ti.Placeholder = "user@domain.com"
 	ti.CharLimit = 128
-	ti.Prompt = "검색: "
+	ti.Prompt = "필터: "
+
+	hsi := textinput.New()
+	hsi.Placeholder = "user@domain.com / IP / 제목 키워드"
+	hsi.CharLimit = 128
+	hsi.Prompt = "이력 검색: "
 
 	// LOGIN starts hidden: dovecot logs a login+logout pair per IMAP
 	// session, so it dominates the list by volume. Counts still track it;
@@ -501,6 +663,7 @@ func initialModel() model {
 		qidSubject:  make(map[string]string),
 		db:          openDirectory(),
 		nameCache:   make(map[string]string),
+		hsInput:     hsi,
 	}
 }
 
@@ -537,11 +700,27 @@ const (
 	footerHeight = 2
 )
 
+// historyVisible applies the current type toggles (1-5) to search results;
+// the query text itself already narrowed them at scan time.
+func (m model) historyVisible() []Event {
+	out := make([]Event, 0, len(m.hsResults))
+	for _, e := range m.hsResults {
+		if m.enabled[e.Type] {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 func (m *model) refreshViewport() {
 	if !m.ready {
 		return
 	}
-	m.viewport.SetContent(renderEvents(m.visibleEvents(), m.viewport.Width))
+	if m.hsActive {
+		m.viewport.SetContent(renderEvents(m.historyVisible(), m.viewport.Width, "일치하는 이력 없음"))
+		return
+	}
+	m.viewport.SetContent(renderEvents(m.visibleEvents(), m.viewport.Width, "이벤트 대기 중 (mail.log 감시 중)"))
 	if m.followTail {
 		m.viewport.GotoBottom()
 	}
@@ -589,6 +768,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
+	case historyResultsMsg:
+		m.hsLoading = false
+		m.hsErr = msg.err
+		m.hsResults = msg.events
+		m.hsQuery = msg.query
+		m.hsActive = true
+		m.refreshViewport()
+		m.viewport.GotoBottom()
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.filtering {
 			switch msg.Type {
@@ -608,12 +797,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		if m.hsTyping {
+			switch msg.Type {
+			case tea.KeyEnter:
+				q := strings.TrimSpace(m.hsInput.Value())
+				m.hsTyping = false
+				m.hsInput.Blur()
+				if q == "" {
+					return m, nil
+				}
+				m.hsLoading = true
+				m.hsActive = true
+				m.refreshViewport()
+				return m, searchHistoryCmd(m.db, q)
+			case tea.KeyEsc:
+				m.hsTyping = false
+				m.hsInput.Blur()
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.hsInput, cmd = m.hsInput.Update(msg)
+			return m, cmd
+		}
+
+		if m.hsActive && msg.String() == "esc" {
+			m.hsActive = false
+			m.refreshViewport()
+			m.viewport.GotoBottom()
+			return m, nil
+		}
+
 		switch {
 		case key.Matches(msg, keys.Quit):
 			return m, tea.Quit
 		case key.Matches(msg, keys.Filter):
 			m.filtering = true
 			m.filterInput.Focus()
+			return m, textinput.Blink
+		case key.Matches(msg, keys.History):
+			m.hsTyping = true
+			m.hsInput.Focus()
 			return m, textinput.Blink
 		case key.Matches(msg, keys.Toggle):
 			idx := int(msg.String()[0] - '1')
@@ -704,13 +927,13 @@ func justify(width int, left, right string) string {
 
 // continuationIndent aligns wrapped lines (e.g. the "수신:" line of a
 // multi-line RECV/SENT/BOUNCE/REJECT event) under the text column, matching
-// the plain-text width of "| 15:04:05 LOGIN   " (bar, time, padded label,
-// separators).
-const continuationIndent = "                   "
+// the plain-text width of "| 08-04 15:34:59 LOGIN   " (bar, date+time,
+// padded label, separators).
+const continuationIndent = "                        "
 
-func renderEvents(events []Event, width int) string {
+func renderEvents(events []Event, width int, emptyMsg string) string {
 	if len(events) == 0 {
-		return dimStyle.Render("  이벤트 대기 중 (mail.log 감시 중)")
+		return dimStyle.Render("  " + emptyMsg)
 	}
 	var b strings.Builder
 	for i, e := range events {
@@ -718,7 +941,7 @@ func renderEvents(events []Event, width int) string {
 		bar := style.Render("|")
 		lines := strings.Split(e.Text, "\n")
 		b.WriteString(fmt.Sprintf("%s %s %-6s %s",
-			bar, dimStyle.Render(e.Time.Format("15:04:05")),
+			bar, dimStyle.Render(e.When),
 			style.Bold(true).Render(e.Type.Label()), lines[0]))
 		for _, l := range lines[1:] {
 			b.WriteString("\n" + continuationIndent + l)
@@ -748,14 +971,27 @@ func (m model) View() string {
 	if m.paused {
 		status = pauseBadge.Render("PAUSED")
 	}
-	filterLabel := filterLabelStyle.Render("필터 ")
-	filterVal := filterValueStyle.Render("전체")
-	if m.filter != "" {
-		filterVal = filterValueStyle.Render(m.filter)
-	}
-	left := filterLabel + filterVal
-	if !m.followTail {
-		left += "  " + dimStyle.Render("(스크롤 중 · G로 최신 이동)")
+
+	var left string
+	switch {
+	case m.hsLoading:
+		left = pauseBadge.Render("검색 중") + "  " + dimStyle.Render(m.hsQuery)
+	case m.hsActive:
+		left = filterLabelStyle.Render("이력 검색 ") + filterValueStyle.Render(m.hsQuery) +
+			dimStyle.Render(fmt.Sprintf("  (%d건 · esc로 복귀)", len(m.hsResults)))
+		if m.hsErr != nil {
+			left += "  " + errStyle.Render(m.hsErr.Error())
+		}
+	default:
+		filterLabel := filterLabelStyle.Render("필터 ")
+		filterVal := filterValueStyle.Render("전체")
+		if m.filter != "" {
+			filterVal = filterValueStyle.Render(m.filter)
+		}
+		left = filterLabel + filterVal
+		if !m.followTail {
+			left += "  " + dimStyle.Render("(스크롤 중 · G로 최신 이동)")
+		}
 	}
 	b.WriteString(justify(m.width, left, status))
 	b.WriteString("\n")
@@ -781,6 +1017,8 @@ func (m model) View() string {
 
 	if m.filtering {
 		b.WriteString(m.filterInput.View())
+	} else if m.hsTyping {
+		b.WriteString(m.hsInput.View())
 	} else if m.showAll {
 		b.WriteString(m.help.FullHelpView(keys.FullHelp()))
 	} else {
