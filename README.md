@@ -72,6 +72,23 @@ sudo postfix reload
 postfix/cleanup[pid]: QUEUEID: warning: header Subject: 견적서 요청드립니다 from host[ip]; from=<...> to=<...> ...
 ```
 
+## 이름 표시 (선택, MySQL 조회)
+
+`users` 테이블(`email`, `name` 컬럼)에서 실명을 조회해 `이름 <email>` 형태로 보여줄 수 있다.
+DB 접속정보는 코드/설정파일에 넣지 않고 환경변수로 전달한다:
+
+```bash
+export MAIL_MONITOR_DB_DSN="user:password@tcp(127.0.0.1:3306)/dbname?timeout=2s"
+mail-monitor
+```
+
+환경변수 없으면 조회 기능 자체가 비활성화되고(연결 시도 안 함) 이메일 원문 그대로 표시된다.
+DB가 죽어있거나 DSN이 틀려도 앱은 정상 기동하고 그냥 조회를 건너뛴다 — 시작 시 최대 2초
+연결 시도 지연만 있음.
+
+systemd 서비스로 상시 실행한다면 `Environment=` 또는 `EnvironmentFile=`로 넣는 걸 추천
+(쉘 히스토리/프로세스 목록에 비밀번호 안 남음).
+
 ## 키보드 단축키
 
 | 키 | 기능 |

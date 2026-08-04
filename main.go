@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +18,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 var version = "dev"
@@ -160,15 +163,16 @@ func (m *model) processLine(line string) *Event {
 			m.qidSubject = make(map[string]string)
 		}
 
-		to := extract(toRe, rest)
-		if to == "-" {
+		toRaw := extract(toRe, rest)
+		if toRaw == "-" {
 			return nil
 		}
+		to := m.addr(toRaw)
 		from, ok := m.qidFrom[qid]
 		if !ok {
 			from = "-"
 		}
-		fromDisplay := fromWithIP(from, m.qidIP[qid])
+		fromDisplay := fromWithIP(m.addr(from), m.qidIP[qid])
 		subject := m.qidSubject[qid]
 
 		switch {
@@ -189,13 +193,13 @@ func (m *model) processLine(line string) *Event {
 
 	switch {
 	case loginRe.MatchString(line):
-		user := extract(userRe, line)
+		user := m.addr(extract(userRe, line))
 		rip := extract(ripRe, line)
 		return &Event{Time: now, Type: EventLogin, Raw: line,
 			Text: fmt.Sprintf("%s from %s", user, rip)}
 	case strings.Contains(line, "reject:"):
-		from := extract(fromRe, line)
-		to := extract(toRe, line)
+		from := m.addr(extract(fromRe, line))
+		to := m.addr(extract(toRe, line))
 		reason := extract(rejectRe, line)
 		ip := ""
 		if im := bracketIP.FindStringSubmatch(line); im != nil {
@@ -291,6 +295,57 @@ func tick() tea.Cmd {
 	})
 }
 
+// --- name directory (optional MySQL lookup) ---
+
+const dsnEnvVar = "MAIL_MONITOR_DB_DSN"
+
+func openDirectory() *sql.DB {
+	dsn := os.Getenv(dsnEnvVar)
+	if dsn == "" {
+		return nil
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		db.Close()
+		return nil
+	}
+	return db
+}
+
+// resolveName looks up a display name for an email address in the `users`
+// table (email, name columns), caching results (including misses) so a
+// forwarding alias fanning out to many recipients only queries each once.
+func (m *model) resolveName(email string) string {
+	if m.db == nil || email == "" || email == "-" || email == "<>" {
+		return ""
+	}
+	if name, ok := m.nameCache[email]; ok {
+		return name
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	var name string
+	err := m.db.QueryRowContext(ctx, "SELECT name FROM users WHERE email = ?", email).Scan(&name)
+	if err != nil {
+		name = ""
+	}
+	m.nameCache[email] = name
+	return name
+}
+
+// addr renders an address as "Name <email>" when a name is known.
+func (m *model) addr(email string) string {
+	if name := m.resolveName(email); name != "" {
+		return fmt.Sprintf("%s <%s>", name, email)
+	}
+	return email
+}
+
 // --- keymap ---
 
 type keyMap struct {
@@ -357,6 +412,9 @@ type model struct {
 	qidFrom    map[string]string
 	qidIP      map[string]string
 	qidSubject map[string]string
+
+	db        *sql.DB
+	nameCache map[string]string
 }
 
 func initialModel() model {
@@ -384,6 +442,8 @@ func initialModel() model {
 		qidFrom:     make(map[string]string),
 		qidIP:       make(map[string]string),
 		qidSubject:  make(map[string]string),
+		db:          openDirectory(),
+		nameCache:   make(map[string]string),
 	}
 }
 
