@@ -45,6 +45,16 @@
 <p><code>/var/log/mail.log</code> 읽기 권한이 필요합니다. sudo 비밀번호 없이 실행하려면:</p>
 <pre><code>echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/tail" | sudo tee /etc/sudoers.d/mail-monitor</code></pre>
 
+<h2>메일 제목(Subject) 표시 (선택, 서버 설정 필요)</h2>
+<p>기본 로그엔 제목이 안 남습니다. <code>header_checks</code>로 Subject만 평문 노출하도록 설정하면 표시됩니다.
+⚠️ 로그에 제목이 평문으로 남으니 접근 권한/보존 정책 고려하고 적용하세요.</p>
+<p><code>/etc/postfix/header_checks</code>:</p>
+<pre><code>/^Subject:/ WARN</code></pre>
+<p><code>/etc/postfix/main.cf</code>에 추가:</p>
+<pre><code>header_checks = regexp:/etc/postfix/header_checks</code></pre>
+<p>반영 (재시작 불필요):</p>
+<pre><code>sudo postfix reload</code></pre>
+
 <h2>키보드 단축키</h2>
 <table>
 <tr><th>키</th><th>기능</th></tr>

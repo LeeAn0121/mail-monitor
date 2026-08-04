@@ -38,6 +38,40 @@ mail-monitor
 echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/tail" | sudo tee /etc/sudoers.d/mail-monitor
 ```
 
+## 메일 제목(Subject) 표시 (선택, 서버 설정 필요)
+
+Postfix 기본 로그엔 제목이 안 남는다. `header_checks`로 Subject만 평문으로 syslog에 남기도록
+설정하면 mail-monitor가 자동으로 집어서 보여준다.
+
+⚠️ 제목이 syslog에 평문으로 저장됨 — 로그 접근 권한/보존 정책 고려하고 적용할 것.
+
+**1. `/etc/postfix/header_checks` 생성**
+
+```
+/^Subject:/ WARN
+```
+
+**2. `/etc/postfix/main.cf`에 추가**
+
+```
+header_checks = regexp:/etc/postfix/header_checks
+```
+
+**3. 반영**
+
+```bash
+sudo postfix reload
+```
+
+`postfix reload`만으로 충분함 (재시작 불필요, 활성 연결 안 끊김).
+
+적용되면 로그에 이런 줄이 남고, mail-monitor가 Queue-ID로 상관관계 매칭해서 이벤트 끝에
+`[제목]`으로 붙여준다:
+
+```
+postfix/cleanup[pid]: QUEUEID: warning: header Subject: 견적서 요청드립니다 from host[ip]; from=<...> to=<...> ...
+```
+
 ## 키보드 단축키
 
 | 키 | 기능 |
