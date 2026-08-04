@@ -42,22 +42,6 @@ const (
 	eventTypeCount
 )
 
-func (e EventType) Icon() string {
-	switch e {
-	case EventLogin:
-		return "🔐"
-	case EventRecv:
-		return "📥"
-	case EventSent:
-		return "📤"
-	case EventBounce:
-		return "❌"
-	case EventReject:
-		return "🚫"
-	}
-	return "?"
-}
-
 func (e EventType) Label() string {
 	switch e {
 	case EventLogin:
@@ -252,18 +236,23 @@ type logLineMsg string
 type tailErrMsg error
 type tickMsg time.Time
 
-// historyWindowBytes bounds how far back nativeTail rewinds for history
-// catch-up, regardless of how large logPath has grown since rotation —
-// otherwise a busy server's full-day log (dovecot alone logs a
-// login+logout pair per IMAP session) replays as a startup flood.
-const historyWindowBytes = 2 * 1024 * 1024
+// historyLines is how many recent lines nativeTail replays as history on
+// startup, before switching to pure live-follow. A busy server's log can
+// have hundreds of thousands of lines (dovecot alone logs a login+logout
+// pair per IMAP session), so this must stay small or it reads as a flood.
+const historyLines = 100
 
-// nativeTail rewinds up to historyWindowBytes from EOF — so the caller sees
-// recent history, not just events from launch onward, without replaying an
-// entire log file — then keeps polling for appended data once it catches up
-// to EOF. This also avoids the startup race of handing off to an external
-// `tail` process (which may not have attached before the first lines land)
-// and lets us read the file directly when permissions allow (no sudo).
+// historyScanBytes is how far back we look to find those last historyLines
+// lines — generous relative to typical line length, cheap to read regardless
+// of how large logPath has grown since rotation.
+const historyScanBytes = 256 * 1024
+
+// nativeTail replays the last historyLines lines of logPath as history, then
+// follows only new appends from that point on — it never rescans or reprints
+// old lines during live-follow. This also avoids the startup race of handing
+// off to an external `tail` process (which may not have attached before the
+// first lines land) and lets us read the file directly when permissions
+// allow (no sudo).
 func nativeTail(ch chan<- string, errCh chan<- error) {
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -272,16 +261,31 @@ func nativeTail(ch chan<- string, errCh chan<- error) {
 	}
 	defer f.Close()
 
-	seeked := false
-	if fi, err := f.Stat(); err == nil && fi.Size() > historyWindowBytes {
-		f.Seek(fi.Size()-historyWindowBytes, io.SeekStart)
-		seeked = true
+	if fi, err := f.Stat(); err == nil {
+		start := int64(0)
+		if fi.Size() > historyScanBytes {
+			start = fi.Size() - historyScanBytes
+		}
+		f.Seek(start, io.SeekStart)
+		scanner := bufio.NewScanner(f)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		var recent []string
+		for scanner.Scan() {
+			recent = append(recent, scanner.Text())
+		}
+		if start > 0 && len(recent) > 0 {
+			recent = recent[1:] // drop the partial line at our scan start
+		}
+		if len(recent) > historyLines {
+			recent = recent[len(recent)-historyLines:]
+		}
+		for _, l := range recent {
+			ch <- l
+		}
 	}
+	f.Seek(0, io.SeekEnd)
 
 	reader := bufio.NewReader(f)
-	if seeked {
-		reader.ReadString('\n') // discard the partial line at our seek point
-	}
 	for {
 		line, err := reader.ReadString('\n')
 		if err == nil {
@@ -299,8 +303,8 @@ func nativeTail(ch chan<- string, errCh chan<- error) {
 }
 
 func subprocessTail(ch chan<- string, errCh chan<- error) {
-	// -n +1 prints from the first line (history) before following, same as nativeTail.
-	cmd := exec.Command("sudo", "tail", "-F", "-n", "+1", logPath)
+	// -n 100 matches nativeTail's historyLines: recent history, then follow.
+	cmd := exec.Command("sudo", "tail", "-F", "-n", fmt.Sprint(historyLines), logPath)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		errCh <- err
@@ -470,7 +474,7 @@ func initialModel() model {
 	ti := textinput.New()
 	ti.Placeholder = "user@domain.com"
 	ti.CharLimit = 128
-	ti.Prompt = "🔎 "
+	ti.Prompt = "검색: "
 
 	// LOGIN starts hidden: dovecot logs a login+logout pair per IMAP
 	// session, so it dominates the list by volume. Counts still track it;
@@ -682,7 +686,7 @@ func cardStyle(color lipgloss.Color, on bool) lipgloss.Style {
 func statCards(m model) string {
 	cards := make([]string, 0, eventTypeCount)
 	for t := EventType(0); t < eventTypeCount; t++ {
-		label := fmt.Sprintf("%s %-6s %d", t.Icon(), t.Label(), m.counts[t])
+		label := fmt.Sprintf("%-6s %d", t.Label(), m.counts[t])
 		cards = append(cards, cardStyle(eventColor[t], m.enabled[t]).Render(label))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, cards...)
@@ -700,21 +704,21 @@ func justify(width int, left, right string) string {
 
 // continuationIndent aligns wrapped lines (e.g. the "수신:" line of a
 // multi-line RECV/SENT/BOUNCE/REJECT event) under the text column, matching
-// the plain-text width of "▎ 15:04:05 🔐 LOGIN  " (bar, time, icon, padded
-// label, separators).
-const continuationIndent = "                     "
+// the plain-text width of "| 15:04:05 LOGIN   " (bar, time, padded label,
+// separators).
+const continuationIndent = "                   "
 
 func renderEvents(events []Event, width int) string {
 	if len(events) == 0 {
-		return dimStyle.Render("  … 이벤트 대기 중 (mail.log 감시 중) …")
+		return dimStyle.Render("  이벤트 대기 중 (mail.log 감시 중)")
 	}
 	var b strings.Builder
 	for i, e := range events {
 		style := lipgloss.NewStyle().Foreground(eventColor[e.Type])
-		bar := style.Render("▎")
+		bar := style.Render("|")
 		lines := strings.Split(e.Text, "\n")
-		b.WriteString(fmt.Sprintf("%s %s %s %-6s %s",
-			bar, dimStyle.Render(e.Time.Format("15:04:05")), e.Type.Icon(),
+		b.WriteString(fmt.Sprintf("%s %s %-6s %s",
+			bar, dimStyle.Render(e.Time.Format("15:04:05")),
 			style.Bold(true).Render(e.Type.Label()), lines[0]))
 		for _, l := range lines[1:] {
 			b.WriteString("\n" + continuationIndent + l)
@@ -734,15 +738,15 @@ func (m model) View() string {
 	var b strings.Builder
 
 	// title row
-	title := titleStyle.Render("📧 Mail Server Monitor")
+	title := titleStyle.Render("Mail Server Monitor")
 	clock := clockStyle.Render(m.now.Format("2006-01-02 15:04:05"))
 	b.WriteString(justify(m.width, title, clock))
 	b.WriteString("\n")
 
 	// status row
-	status := runBadge.Render("▶ RUNNING")
+	status := runBadge.Render("RUNNING")
 	if m.paused {
-		status = pauseBadge.Render("⏸ PAUSED")
+		status = pauseBadge.Render("PAUSED")
 	}
 	filterLabel := filterLabelStyle.Render("필터 ")
 	filterVal := filterValueStyle.Render("전체")
@@ -761,7 +765,7 @@ func (m model) View() string {
 	b.WriteString("\n")
 
 	if m.err != nil {
-		b.WriteString(errStyle.Render("⚠ " + m.err.Error()))
+		b.WriteString(errStyle.Render("ERROR: " + m.err.Error()))
 		b.WriteString("\n")
 	}
 
