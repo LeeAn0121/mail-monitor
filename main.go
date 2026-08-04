@@ -113,10 +113,11 @@ func parseLine(line string) *Event {
 		return &Event{Time: now, Type: EventRecv, Raw: line,
 			Text: fmt.Sprintf("%s → %s", from, to)}
 	case strings.Contains(line, "reject:"):
+		from := extract(fromRe, line)
 		to := extract(toRe, line)
 		reason := extract(rejectRe, line)
 		return &Event{Time: now, Type: EventReject, Raw: line,
-			Text: fmt.Sprintf("to %s (%s)", to, reason)}
+			Text: fmt.Sprintf("%s → %s (%s)", from, to, reason)}
 	}
 	return nil
 }
@@ -532,6 +533,11 @@ func (m model) View() string {
 }
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
+		fmt.Println("mail-monitor " + version)
+		return
+	}
+
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

@@ -11,6 +11,20 @@ curl -fsSL https://LeeAn0121.github.io/mail-monitor/install.sh | bash
 수동으로 `.deb`만 받으려면 [Releases](https://github.com/LeeAn0121/mail-monitor/releases)에서
 `mail-monitor_<version>_linux_<arch>.deb`를 받아 `sudo dpkg -i`로 설치.
 
+## 업데이트
+
+설치 스크립트를 다시 실행하면 최신 릴리스로 덮어 설치된다:
+
+```bash
+curl -fsSL https://leean0121.github.io/mail-monitor/install.sh | bash
+```
+
+현재 설치된 버전 확인:
+
+```bash
+mail-monitor --version
+```
+
 ## 실행
 
 ```bash
