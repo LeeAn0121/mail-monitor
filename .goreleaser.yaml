@@ -30,8 +30,8 @@ nfpms:
   - id: mail-monitor-deb
     package_name: mail-monitor
     vendor: koolsign
-    homepage: https://jggen0121.github.io/mail-monitor/
-    maintainer: jggen0121 <koolsignpad@gmail.com>
+    homepage: https://LeeAn0121.github.io/mail-monitor/
+    maintainer: LeeAn0121 <koolsignpad@gmail.com>
     description: >-
       Real-time TUI dashboard for monitoring Postfix/Dovecot mail server logs
       (logins, delivery, sent, bounces, rejects).
@@ -50,7 +50,7 @@ checksum:
 
 release:
   github:
-    owner: jggen0121
+    owner: LeeAn0121
     name: mail-monitor
 
 changelog:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="jggen0121/mail-monitor"
+REPO="LeeAn0121/mail-monitor"
 
 case "$(uname -m)" in
   x86_64) ARCH="amd64" ;;

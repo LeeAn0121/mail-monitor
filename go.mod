@@ -1,4 +1,4 @@
-module github.com/jggen0121/mail-monitor
+module github.com/LeeAn0121/mail-monitor
 
 go 1.21
 

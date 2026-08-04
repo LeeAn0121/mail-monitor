@@ -5,10 +5,10 @@ Postfix / Dovecot `mail.log`을 실시간으로 보여주는 TUI 대시보드 (G
 ## 설치 (Ubuntu/Debian)
 
 ```bash
-curl -fsSL https://jggen0121.github.io/mail-monitor/install.sh | bash
+curl -fsSL https://LeeAn0121.github.io/mail-monitor/install.sh | bash
 ```
 
-수동으로 `.deb`만 받으려면 [Releases](https://github.com/jggen0121/mail-monitor/releases)에서
+수동으로 `.deb`만 받으려면 [Releases](https://github.com/LeeAn0121/mail-monitor/releases)에서
 `mail-monitor_<version>_linux_<arch>.deb`를 받아 `sudo dpkg -i`로 설치.
 
 ## 실행
