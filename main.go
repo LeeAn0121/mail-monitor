@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -79,13 +80,15 @@ var (
 	// e.g. "... postfix/qmgr[2568950]: 933E0AC0470: from=<...>, size=..." -> ("933E0AC0470", "from=<...>, size=...")
 	qidLineRe = regexp.MustCompile(`^\S+ +\d+ +\S+ +\S+ +\S+: ([0-9A-F]{9,14}): (.*)$`)
 
-	loginRe  = regexp.MustCompile(`dovecot.*(?:auth.*Success|imap-login.*Login)`)
-	userRe   = regexp.MustCompile(`user=<([^>]*)>`)
-	ripRe    = regexp.MustCompile(`rip=([0-9.]+)`)
-	fromRe   = regexp.MustCompile(`from=<([^>]*)>`)
-	toRe     = regexp.MustCompile(`to=<([^>]*)>`)
-	relayRe  = regexp.MustCompile(`relay=([^,\s]*)`)
-	rejectRe = regexp.MustCompile(`reject:\s*([^;]*)`)
+	loginRe   = regexp.MustCompile(`dovecot.*(?:auth.*Success|imap-login.*Login)`)
+	userRe    = regexp.MustCompile(`user=<([^>]*)>`)
+	ripRe     = regexp.MustCompile(`rip=([0-9.]+)`)
+	fromRe    = regexp.MustCompile(`from=<([^>]*)>`)
+	toRe      = regexp.MustCompile(`to=<([^>]*)>`)
+	relayRe   = regexp.MustCompile(`relay=([^,\s]*)`)
+	rejectRe  = regexp.MustCompile(`reject:\s*([^;]*)`)
+	clientRe  = regexp.MustCompile(`client=\S+\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
+	bracketIP = regexp.MustCompile(`\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
 )
 
 func extract(re *regexp.Regexp, line string) string {
@@ -106,9 +109,17 @@ func isLocalRelay(relay string) bool {
 	return !strings.Contains(relay, "[")
 }
 
-// processLine parses one mail.log line into an Event, using qidFrom to
-// correlate postfix's "from=" (logged once per message, e.g. by qmgr) with
-// the later delivery-agent line that carries "to=" and "status=".
+// fromWithIP formats a sender address with its client IP, when known.
+func fromWithIP(from, ip string) string {
+	if ip == "" {
+		return from
+	}
+	return fmt.Sprintf("%s (%s)", from, ip)
+}
+
+// processLine parses one mail.log line into an Event. Postfix logs a
+// message's from=, client IP, and eventual to=/status= on separate lines
+// that share only a Queue-ID, so qidFrom/qidIP correlate them across lines.
 func (m *model) processLine(line string) *Event {
 	now := time.Now()
 
@@ -118,12 +129,17 @@ func (m *model) processLine(line string) *Event {
 		if from := extract(fromRe, rest); from != "-" {
 			m.qidFrom[qid] = from
 		}
+		if cm := clientRe.FindStringSubmatch(rest); cm != nil {
+			m.qidIP[qid] = cm[1]
+		}
 		if strings.Contains(rest, ": removed") || rest == "removed" {
 			delete(m.qidFrom, qid)
+			delete(m.qidIP, qid)
 			return nil
 		}
 		if len(m.qidFrom) > 20000 {
 			m.qidFrom = make(map[string]string)
+			m.qidIP = make(map[string]string)
 		}
 
 		to := extract(toRe, rest)
@@ -134,19 +150,20 @@ func (m *model) processLine(line string) *Event {
 		if !ok {
 			from = "-"
 		}
+		fromDisplay := fromWithIP(from, m.qidIP[qid])
 
 		switch {
 		case strings.Contains(rest, "status=bounced"):
 			return &Event{Time: now, Type: EventBounce, Raw: line,
-				Text: fmt.Sprintf("%s → %s", from, to)}
+				Text: fmt.Sprintf("%s → %s", fromDisplay, to)}
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			if isLocalRelay(relay) {
 				return &Event{Time: now, Type: EventRecv, Raw: line,
-					Text: fmt.Sprintf("%s → %s", from, to)}
+					Text: fmt.Sprintf("%s → %s", fromDisplay, to)}
 			}
 			return &Event{Time: now, Type: EventSent, Raw: line,
-				Text: fmt.Sprintf("%s → %s via %s", from, to, relay)}
+				Text: fmt.Sprintf("%s → %s via %s", fromDisplay, to, relay)}
 		}
 		return nil
 	}
@@ -161,8 +178,12 @@ func (m *model) processLine(line string) *Event {
 		from := extract(fromRe, line)
 		to := extract(toRe, line)
 		reason := extract(rejectRe, line)
+		ip := ""
+		if im := bracketIP.FindStringSubmatch(line); im != nil {
+			ip = im[1]
+		}
 		return &Event{Time: now, Type: EventReject, Raw: line,
-			Text: fmt.Sprintf("%s → %s (%s)", from, to, reason)}
+			Text: fmt.Sprintf("%s → %s (%s)", fromWithIP(from, ip), to, reason)}
 	}
 	return nil
 }
@@ -173,15 +194,41 @@ type logLineMsg string
 type tailErrMsg error
 type tickMsg time.Time
 
-func startTail(ch chan<- string, errCh chan<- error) {
-	args := []string{"-F", "-n", "0", logPath}
-	var cmd *exec.Cmd
-	if f, err := os.Open(logPath); err == nil {
-		f.Close()
-		cmd = exec.Command("tail", args...)
-	} else {
-		cmd = exec.Command("sudo", append([]string{"tail"}, args...)...)
+// nativeTail follows logPath by seeking to EOF up front and polling for
+// appended data, avoiding the startup race of handing off to an external
+// `tail` process (which may not have attached before the first lines land)
+// and letting us read the file directly when permissions allow (no sudo).
+func nativeTail(ch chan<- string, errCh chan<- error) {
+	f, err := os.Open(logPath)
+	if err != nil {
+		errCh <- err
+		return
 	}
+	defer f.Close()
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		errCh <- err
+		return
+	}
+
+	reader := bufio.NewReader(f)
+	for {
+		line, err := reader.ReadString('\n')
+		if err == nil {
+			ch <- strings.TrimRight(line, "\n")
+			continue
+		}
+		if fi, statErr := os.Stat(logPath); statErr == nil {
+			if cur, _ := f.Seek(0, io.SeekCurrent); fi.Size() < cur {
+				f.Seek(0, io.SeekStart)
+				reader = bufio.NewReader(f)
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
+func subprocessTail(ch chan<- string, errCh chan<- error) {
+	cmd := exec.Command("sudo", "tail", "-F", "-n", "0", logPath)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		errCh <- err
@@ -196,6 +243,15 @@ func startTail(ch chan<- string, errCh chan<- error) {
 	for scanner.Scan() {
 		ch <- scanner.Text()
 	}
+}
+
+func startTail(ch chan<- string, errCh chan<- error) {
+	if f, err := os.Open(logPath); err == nil {
+		f.Close()
+		nativeTail(ch, errCh)
+		return
+	}
+	subprocessTail(ch, errCh)
 }
 
 func waitForLine(ch <-chan string) tea.Cmd {
@@ -280,6 +336,7 @@ type model struct {
 	showAll bool
 
 	qidFrom map[string]string
+	qidIP   map[string]string
 }
 
 func initialModel() model {
@@ -305,6 +362,7 @@ func initialModel() model {
 		followTail:  true,
 		help:        h,
 		qidFrom:     make(map[string]string),
+		qidIP:       make(map[string]string),
 	}
 }
 
