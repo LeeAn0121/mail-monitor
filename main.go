@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"mime"
 	"os"
 	"os/exec"
 	"regexp"
@@ -20,6 +21,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/joho/godotenv"
+	"golang.org/x/text/encoding/htmlindex"
 )
 
 var version = "dev"
@@ -122,14 +124,36 @@ func fromWithIP(from, ip string) string {
 	return fmt.Sprintf("%s (%s)", from, ip)
 }
 
+// mimeWordDecoder decodes RFC 2047 encoded-words (e.g. "=?ks_c_5601-1987?B?...?=",
+// common for Korean subjects) into UTF-8, resolving legacy MIME charset
+// names like ks_c_5601-1987 (EUC-KR) via the IANA charset registry.
+var mimeWordDecoder = &mime.WordDecoder{
+	CharsetReader: func(charset string, input io.Reader) (io.Reader, error) {
+		enc, err := htmlindex.Get(charset)
+		if err != nil || enc == nil {
+			return input, nil
+		}
+		return enc.NewDecoder().Reader(input), nil
+	},
+}
+
+// decodeSubject best-effort decodes a raw header value; on any failure it
+// falls back to the original (still-encoded) text rather than dropping it.
+func decodeSubject(s string) string {
+	if decoded, err := mimeWordDecoder.DecodeHeader(s); err == nil {
+		return decoded
+	}
+	return s
+}
+
 // withSubject appends a truncated [Subject] suffix when known.
 func withSubject(text, subject string) string {
 	if subject == "" {
 		return text
 	}
 	const maxLen = 60
-	if len(subject) > maxLen {
-		subject = subject[:maxLen] + "…"
+	if r := []rune(subject); len(r) > maxLen {
+		subject = string(r[:maxLen]) + "…"
 	}
 	return fmt.Sprintf("%s [%s]", text, subject)
 }
@@ -150,7 +174,7 @@ func (m *model) processLine(line string) *Event {
 			m.qidIP[qid] = cm[1]
 		}
 		if sm := subjectRe.FindStringSubmatch(rest); sm != nil {
-			m.qidSubject[qid] = sm[1]
+			m.qidSubject[qid] = decodeSubject(sm[1])
 		}
 		if strings.Contains(rest, ": removed") || rest == "removed" {
 			delete(m.qidFrom, qid)
