@@ -252,12 +252,18 @@ type logLineMsg string
 type tailErrMsg error
 type tickMsg time.Time
 
-// nativeTail reads logPath from the beginning — so the caller sees existing
-// history, not just events from launch onward — then keeps polling for
-// appended data once it catches up to EOF. This also avoids the startup
-// race of handing off to an external `tail` process (which may not have
-// attached before the first lines land) and lets us read the file directly
-// when permissions allow (no sudo).
+// historyWindowBytes bounds how far back nativeTail rewinds for history
+// catch-up, regardless of how large logPath has grown since rotation —
+// otherwise a busy server's full-day log (dovecot alone logs a
+// login+logout pair per IMAP session) replays as a startup flood.
+const historyWindowBytes = 2 * 1024 * 1024
+
+// nativeTail rewinds up to historyWindowBytes from EOF — so the caller sees
+// recent history, not just events from launch onward, without replaying an
+// entire log file — then keeps polling for appended data once it catches up
+// to EOF. This also avoids the startup race of handing off to an external
+// `tail` process (which may not have attached before the first lines land)
+// and lets us read the file directly when permissions allow (no sudo).
 func nativeTail(ch chan<- string, errCh chan<- error) {
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -266,7 +272,16 @@ func nativeTail(ch chan<- string, errCh chan<- error) {
 	}
 	defer f.Close()
 
+	seeked := false
+	if fi, err := f.Stat(); err == nil && fi.Size() > historyWindowBytes {
+		f.Seek(fi.Size()-historyWindowBytes, io.SeekStart)
+		seeked = true
+	}
+
 	reader := bufio.NewReader(f)
+	if seeked {
+		reader.ReadString('\n') // discard the partial line at our seek point
+	}
 	for {
 		line, err := reader.ReadString('\n')
 		if err == nil {
@@ -457,10 +472,14 @@ func initialModel() model {
 	ti.CharLimit = 128
 	ti.Prompt = "🔎 "
 
+	// LOGIN starts hidden: dovecot logs a login+logout pair per IMAP
+	// session, so it dominates the list by volume. Counts still track it;
+	// press 1 to show it.
 	var enabled [eventTypeCount]bool
 	for i := range enabled {
 		enabled[i] = true
 	}
+	enabled[EventLogin] = false
 
 	h := help.New()
 
