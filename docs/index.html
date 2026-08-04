@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mail-monitor — TUI Mail Server Monitor</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    max-width: 760px;
+    margin: 4rem auto;
+    padding: 0 1.5rem;
+    line-height: 1.6;
+  }
+  h1 { font-size: 1.6rem; }
+  pre {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    padding: 1rem 1.25rem;
+    border-radius: 8px;
+    overflow-x: auto;
+  }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .badge { display:inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; background:#eee; font-size:0.8rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 0.35rem 0.6rem; border-bottom: 1px solid #ddd; }
+</style>
+</head>
+<body>
+<h1>📧 mail-monitor</h1>
+<p>Postfix / Dovecot 로그를 실시간으로 보여주는 터미널(TUI) 대시보드. <span class="badge">Go + Bubble Tea</span></p>
+
+<h2>설치</h2>
+<pre><code>curl -fsSL https://jggen0121.github.io/mail-monitor/install.sh | bash</code></pre>
+<p>Ubuntu/Debian용 <code>.deb</code> 패키지를 GitHub Releases에서 받아 <code>dpkg -i</code>로 설치합니다.</p>
+
+<h2>실행</h2>
+<pre><code>mail-monitor</code></pre>
+<p><code>/var/log/mail.log</code> 읽기 권한이 필요합니다. sudo 비밀번호 없이 실행하려면:</p>
+<pre><code>echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/tail" | sudo tee /etc/sudoers.d/mail-monitor</code></pre>
+
+<h2>키보드 단축키</h2>
+<table>
+<tr><th>키</th><th>기능</th></tr>
+<tr><td><code>f</code></td><td>사용자/도메인 필터</td></tr>
+<tr><td><code>1</code>~<code>5</code></td><td>이벤트 종류 토글 (로그인/수신/송신/반송/거절)</td></tr>
+<tr><td><code>space</code></td><td>일시정지 / 재개</td></tr>
+<tr><td><code>c</code></td><td>화면 클리어</td></tr>
+<tr><td><code>q</code></td><td>종료</td></tr>
+</table>
+
+<h2>소스</h2>
+<p><a href="https://github.com/jggen0121/mail-monitor">github.com/jggen0121/mail-monitor</a></p>
+</body>
+</html>

@@ -1,0 +1,61 @@
+version: 2
+
+project_name: mail-monitor
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: mail-monitor
+    main: .
+    binary: mail-monitor
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - id: mail-monitor
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+nfpms:
+  - id: mail-monitor-deb
+    package_name: mail-monitor
+    vendor: koolsign
+    homepage: https://jggen0121.github.io/mail-monitor/
+    maintainer: jggen0121 <koolsignpad@gmail.com>
+    description: >-
+      Real-time TUI dashboard for monitoring Postfix/Dovecot mail server logs
+      (logins, delivery, sent, bounces, rejects).
+    license: MIT
+    formats:
+      - deb
+    section: utils
+    priority: optional
+    bindir: /usr/bin
+    contents:
+      - src: ./README.md
+        dst: /usr/share/doc/mail-monitor/README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: jggen0121
+    name: mail-monitor
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
