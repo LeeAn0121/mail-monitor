@@ -75,6 +75,10 @@ type Event struct {
 }
 
 var (
+	// captures the postfix queue id and the remainder of the line after "QID: "
+	// e.g. "... postfix/qmgr[2568950]: 933E0AC0470: from=<...>, size=..." -> ("933E0AC0470", "from=<...>, size=...")
+	qidLineRe = regexp.MustCompile(`^\S+ +\d+ +\S+ +\S+ +\S+: ([0-9A-F]{9,14}): (.*)$`)
+
 	loginRe  = regexp.MustCompile(`dovecot.*(?:auth.*Success|imap-login.*Login)`)
 	userRe   = regexp.MustCompile(`user=<([^>]*)>`)
 	ripRe    = regexp.MustCompile(`rip=([0-9.]+)`)
@@ -89,29 +93,70 @@ func extract(re *regexp.Regexp, line string) string {
 	if len(m) < 2 {
 		return "-"
 	}
+	if m[1] == "" {
+		return "<>"
+	}
 	return m[1]
 }
 
-func parseLine(line string) *Event {
+// isLocalRelay reports whether a postfix relay= value is a local delivery
+// agent (virtual/local/lmtp/spamassassin/...) rather than a remote host,
+// which always appears as "host[ip]:port".
+func isLocalRelay(relay string) bool {
+	return !strings.Contains(relay, "[")
+}
+
+// processLine parses one mail.log line into an Event, using qidFrom to
+// correlate postfix's "from=" (logged once per message, e.g. by qmgr) with
+// the later delivery-agent line that carries "to=" and "status=".
+func (m *model) processLine(line string) *Event {
 	now := time.Now()
+
+	if qm := qidLineRe.FindStringSubmatch(line); qm != nil {
+		qid, rest := qm[1], qm[2]
+
+		if from := extract(fromRe, rest); from != "-" {
+			m.qidFrom[qid] = from
+		}
+		if strings.Contains(rest, ": removed") || rest == "removed" {
+			delete(m.qidFrom, qid)
+			return nil
+		}
+		if len(m.qidFrom) > 20000 {
+			m.qidFrom = make(map[string]string)
+		}
+
+		to := extract(toRe, rest)
+		if to == "-" {
+			return nil
+		}
+		from, ok := m.qidFrom[qid]
+		if !ok {
+			from = "-"
+		}
+
+		switch {
+		case strings.Contains(rest, "status=bounced"):
+			return &Event{Time: now, Type: EventBounce, Raw: line,
+				Text: fmt.Sprintf("%s → %s", from, to)}
+		case strings.Contains(rest, "status=sent"):
+			relay := extract(relayRe, rest)
+			if isLocalRelay(relay) {
+				return &Event{Time: now, Type: EventRecv, Raw: line,
+					Text: fmt.Sprintf("%s → %s", from, to)}
+			}
+			return &Event{Time: now, Type: EventSent, Raw: line,
+				Text: fmt.Sprintf("%s → %s via %s", from, to, relay)}
+		}
+		return nil
+	}
+
 	switch {
 	case loginRe.MatchString(line):
 		user := extract(userRe, line)
 		rip := extract(ripRe, line)
 		return &Event{Time: now, Type: EventLogin, Raw: line,
 			Text: fmt.Sprintf("%s from %s", user, rip)}
-	case strings.Contains(line, "status=bounced"):
-		from, to := extract(fromRe, line), extract(toRe, line)
-		return &Event{Time: now, Type: EventBounce, Raw: line,
-			Text: fmt.Sprintf("%s → %s", from, to)}
-	case strings.Contains(line, "status=sent"):
-		from, to, relay := extract(fromRe, line), extract(toRe, line), extract(relayRe, line)
-		return &Event{Time: now, Type: EventSent, Raw: line,
-			Text: fmt.Sprintf("%s → %s via %s", from, to, relay)}
-	case strings.Contains(line, "status=delivered"):
-		from, to := extract(fromRe, line), extract(toRe, line)
-		return &Event{Time: now, Type: EventRecv, Raw: line,
-			Text: fmt.Sprintf("%s → %s", from, to)}
 	case strings.Contains(line, "reject:"):
 		from := extract(fromRe, line)
 		to := extract(toRe, line)
@@ -233,6 +278,8 @@ type model struct {
 
 	help    help.Model
 	showAll bool
+
+	qidFrom map[string]string
 }
 
 func initialModel() model {
@@ -257,6 +304,7 @@ func initialModel() model {
 		dayStart:    time.Now(),
 		followTail:  true,
 		help:        h,
+		qidFrom:     make(map[string]string),
 	}
 }
 
@@ -330,7 +378,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.paused {
 			return m, cmd
 		}
-		if ev := parseLine(string(msg)); ev != nil {
+		if ev := m.processLine(string(msg)); ev != nil {
 			m.counts[ev.Type]++
 			m.events = append(m.events, *ev)
 			if len(m.events) > maxEvents {
