@@ -28,7 +28,7 @@ var version = "dev"
 
 const (
 	logPath   = "/var/log/mail.log"
-	maxEvents = 500
+	maxEvents = 5000
 )
 
 type EventType int
@@ -137,9 +137,19 @@ var mimeWordDecoder = &mime.WordDecoder{
 	},
 }
 
+// foldArtifactRe matches the mangled junction Postfix leaves when it logs a
+// header that was folded across multiple lines: it replaces the folding
+// CRLF with literal "?" characters, turning "...?=\r\n =?UTF-8?B?..." into
+// "...?=??=?UTF-8?B?..." (or a single "?" plus real whitespace). Both
+// variants break RFC 2047 parsing, so normalize them back to a plain space
+// before decoding — adjacent encoded-words separated only by whitespace are
+// concatenated per spec, same as the original unfolded header intended.
+var foldArtifactRe = regexp.MustCompile(`\?=\?+\s*=\?`)
+
 // decodeSubject best-effort decodes a raw header value; on any failure it
 // falls back to the original (still-encoded) text rather than dropping it.
 func decodeSubject(s string) string {
+	s = foldArtifactRe.ReplaceAllString(s, "?= =?")
 	if decoded, err := mimeWordDecoder.DecodeHeader(s); err == nil {
 		return decoded
 	}
@@ -242,10 +252,12 @@ type logLineMsg string
 type tailErrMsg error
 type tickMsg time.Time
 
-// nativeTail follows logPath by seeking to EOF up front and polling for
-// appended data, avoiding the startup race of handing off to an external
-// `tail` process (which may not have attached before the first lines land)
-// and letting us read the file directly when permissions allow (no sudo).
+// nativeTail reads logPath from the beginning — so the caller sees existing
+// history, not just events from launch onward — then keeps polling for
+// appended data once it catches up to EOF. This also avoids the startup
+// race of handing off to an external `tail` process (which may not have
+// attached before the first lines land) and lets us read the file directly
+// when permissions allow (no sudo).
 func nativeTail(ch chan<- string, errCh chan<- error) {
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -253,10 +265,6 @@ func nativeTail(ch chan<- string, errCh chan<- error) {
 		return
 	}
 	defer f.Close()
-	if _, err := f.Seek(0, io.SeekEnd); err != nil {
-		errCh <- err
-		return
-	}
 
 	reader := bufio.NewReader(f)
 	for {
@@ -276,7 +284,8 @@ func nativeTail(ch chan<- string, errCh chan<- error) {
 }
 
 func subprocessTail(ch chan<- string, errCh chan<- error) {
-	cmd := exec.Command("sudo", "tail", "-F", "-n", "0", logPath)
+	// -n +1 prints from the first line (history) before following, same as nativeTail.
+	cmd := exec.Command("sudo", "tail", "-F", "-n", "+1", logPath)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		errCh <- err
@@ -398,7 +407,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 }
 
 var keys = keyMap{
-	Filter: key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "필터")),
+	Filter: key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "필터/검색")),
 	Toggle: key.NewBinding(key.WithKeys("1", "2", "3", "4", "5"), key.WithHelp("1-5", "이벤트 토글")),
 	Pause:  key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "정지/재개")),
 	Clear:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "클리어")),
@@ -477,11 +486,16 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(waitForLine(m.lineCh), waitForErr(m.errCh), tick(), textinput.Blink)
 }
 
+// matchesFilter checks the raw log line (addresses, IPs, hostnames) and the
+// rendered event text (decoded subject, resolved names) so search covers
+// both what postfix logged and what mail-monitor derived from it.
 func (m model) matchesFilter(e Event) bool {
 	if m.filter == "" {
 		return true
 	}
-	return strings.Contains(strings.ToLower(e.Raw), strings.ToLower(m.filter))
+	needle := strings.ToLower(m.filter)
+	return strings.Contains(strings.ToLower(e.Raw), needle) ||
+		strings.Contains(strings.ToLower(e.Text), needle)
 }
 
 // visibleEvents returns events passing the current type/filter settings.

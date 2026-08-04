@@ -38,6 +38,10 @@ mail-monitor
 echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/tail" | sudo tee /etc/sudoers.d/mail-monitor
 ```
 
+실행하면 `mail.log`를 처음부터 읽어서 기존 이력을 먼저 보여준 다음 실시간 tail로 이어진다
+(최근 5000건 보관). `f`로 필터 걸면 이력 전체에서 검색된다 — 로그 원문뿐 아니라 디코딩된
+제목/조회된 이름까지 검색 대상.
+
 ## 메일 제목(Subject) 표시 (선택, 서버 설정 필요)
 
 Postfix 기본 로그엔 제목이 안 남는다. `header_checks`로 Subject만 평문으로 syslog에 남기도록
@@ -104,7 +108,7 @@ sudo chmod 600 /etc/mail-monitor/.env
 
 | 키 | 기능 |
 |----|------|
-| `f` | 사용자/도메인 필터 입력 |
+| `f` | 필터/검색 입력 (주소·IP·이름·제목 대상) |
 | `1`~`5` | 이벤트 종류 토글 (로그인/수신/송신/반송/거절) |
 | `space` | 일시정지 / 재개 |
 | `c` | 화면 클리어 |
