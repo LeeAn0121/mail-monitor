@@ -3,68 +3,569 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mail-monitor — TUI Mail Server Monitor</title>
+<title>mail-monitor — 터미널에서 보는 메일 서버 로그</title>
+<meta name="description" content="Postfix / Dovecot 로그를 실시간으로 읽어 로그인·수신·발신·반송·거절을 색으로 구분해 보여주는 TUI 대시보드.">
 <style>
-  :root { color-scheme: light dark; }
+  :root {
+    --bg: #0b0e14;
+    --panel: #12161f;
+    --panel-2: #171c28;
+    --border: #232838;
+    --text: #e6e9ef;
+    --muted: #7b8496;
+    --muted-2: #4d5568;
+    --amber: #ffb300;
+    --c-login: #5fafff;
+    --c-recv: #00d787;
+    --c-sent: #ffaf00;
+    --c-bounce: #ff5f5f;
+    --c-reject: #ff5fa8;
+    --mono: ui-monospace, "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    overflow-x: hidden;
+  }
+
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    max-width: 760px;
-    margin: 4rem auto;
-    padding: 0 1.5rem;
+    font-family: var(--mono);
     line-height: 1.6;
+    background-image:
+      radial-gradient(ellipse 900px 500px at 20% -10%, rgba(255,179,0,0.07), transparent),
+      radial-gradient(ellipse 700px 500px at 100% 10%, rgba(0,215,135,0.05), transparent);
   }
-  h1 { font-size: 1.6rem; }
-  pre {
-    background: #1e1e2e;
-    color: #cdd6f4;
-    padding: 1rem 1.25rem;
+
+  main {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 3.5rem 1.25rem 4rem;
+  }
+
+  a { color: var(--amber); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 2px;
+  }
+
+  /* ---------- terminal window ---------- */
+
+  .term {
+    background: var(--panel);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    overflow-x: auto;
+    overflow: hidden;
+    box-shadow: 0 40px 80px -30px rgba(0,0,0,0.6);
   }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  .badge { display:inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; background:#eee; font-size:0.8rem; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 0.35rem 0.6rem; border-bottom: 1px solid #ddd; }
+
+  .term-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.9rem;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .term-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .term-dot.r { background: #ff5f56; }
+  .term-dot.y { background: #ffbd2e; }
+  .term-dot.g { background: #27c93f; }
+
+  .term-title {
+    margin-left: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  .term-version {
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: var(--muted-2);
+  }
+
+  .term-body {
+    padding: 1rem 1.1rem 1.2rem;
+    font-size: 0.82rem;
+  }
+
+  .term-prompt { color: var(--muted); margin-bottom: 0.75rem; }
+  .term-prompt .sym { color: var(--c-recv); }
+
+  .term-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .pill {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.72rem;
+    display: flex;
+    gap: 0.4rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .pill b { font-weight: 600; }
+  .pill .n { color: var(--text); min-width: 1.4em; text-align: right; }
+
+  .pill.login { border-color: color-mix(in srgb, var(--c-login) 45%, var(--border)); }
+  .pill.recv  { border-color: color-mix(in srgb, var(--c-recv) 45%, var(--border)); }
+  .pill.sent  { border-color: color-mix(in srgb, var(--c-sent) 45%, var(--border)); }
+  .pill.bounce{ border-color: color-mix(in srgb, var(--c-bounce) 45%, var(--border)); }
+  .pill.reject{ border-color: color-mix(in srgb, var(--c-reject) 45%, var(--border)); }
+  .pill.login b { color: var(--c-login); }
+  .pill.recv b { color: var(--c-recv); }
+  .pill.sent b { color: var(--c-sent); }
+  .pill.bounce b { color: var(--c-bounce); }
+  .pill.reject b { color: var(--c-reject); }
+
+  .term-log {
+    height: 12.6em;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    border-top: 1px solid var(--border);
+    padding-top: 0.6rem;
+  }
+
+  .log-line {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.1rem 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    animation: rise 0.35s ease-out;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .log-time { color: var(--muted-2); flex-shrink: 0; }
+  .log-tag { flex-shrink: 0; font-weight: 700; width: 4.6em; }
+  .log-tag.login { color: var(--c-login); }
+  .log-tag.recv { color: var(--c-recv); }
+  .log-tag.sent { color: var(--c-sent); }
+  .log-tag.bounce { color: var(--c-bounce); }
+  .log-tag.reject { color: var(--c-reject); }
+  .log-text { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .log-text b { color: var(--text); font-weight: 500; }
+
+  .cursor {
+    display: inline-block;
+    width: 0.55em;
+    height: 1em;
+    background: var(--amber);
+    vertical-align: -0.15em;
+    animation: blink 1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .cursor { animation: none; }
+    .log-line { animation: none; }
+  }
+
+  /* ---------- hero copy ---------- */
+
+  .hero-copy { margin-top: 2.2rem; }
+
+  .eyebrow {
+    color: var(--amber);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.9rem;
+  }
+  .eyebrow::before { content: "$ "; color: var(--muted-2); }
+
+  h1 {
+    font-size: clamp(1.5rem, 4vw, 2.15rem);
+    line-height: 1.35;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 0.9rem;
+  }
+
+  .lede {
+    color: var(--muted);
+    font-size: 0.95rem;
+    max-width: 56ch;
+    margin: 0 0 1.6rem;
+  }
+  .lede b { color: var(--text); font-weight: 600; }
+
+  .install-row {
+    display: flex;
+    align-items: stretch;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+
+  .install-cmd {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.65rem 0.9rem;
+    font-size: 0.82rem;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .install-cmd .sym { color: var(--c-recv); flex-shrink: 0; }
+  .install-cmd code {
+    overflow-x: auto;
+    white-space: nowrap;
+    color: var(--text);
+  }
+
+  .copy-btn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    padding: 0 1rem;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .copy-btn:hover { color: var(--text); border-color: var(--muted-2); }
+  .copy-btn.copied { color: var(--c-recv); border-color: var(--c-recv); }
+
+  .hero-links {
+    margin-top: 0.9rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+
+  /* ---------- sections ---------- */
+
+  section { margin-top: 3.6rem; }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 1.1rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-tag {
+    font-size: 0.72rem;
+    color: var(--muted-2);
+    letter-spacing: 0.06em;
+  }
+  h2 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 0;
+  }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .feature {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--c);
+    border-radius: 4px;
+    padding: 0.85rem 1rem;
+    background: var(--panel);
+  }
+  .feature .tag {
+    font-weight: 700;
+    font-size: 0.78rem;
+    color: var(--c);
+    margin-bottom: 0.4rem;
+  }
+  .feature p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+
+  table.keys {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  table.keys td {
+    padding: 0.55rem 0.4rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+  }
+  table.keys td:first-child { width: 8rem; }
+
+  kbd {
+    display: inline-block;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0.12rem 0.5rem;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--text);
+  }
+
+  .opt {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    margin-bottom: 0.7rem;
+    overflow: hidden;
+  }
+  .opt summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 0.8rem 1rem;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .opt summary::-webkit-details-marker { display: none; }
+  .opt summary::before {
+    content: "+";
+    color: var(--amber);
+    font-weight: 700;
+    width: 1em;
+  }
+  .opt[open] summary::before { content: "−"; }
+  .opt summary .flag { color: var(--amber); }
+  .opt-body {
+    padding: 0 1rem 1rem 2.4rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+  .opt-body p { margin: 0.4rem 0; }
+  .opt-body code {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.1rem 0.35rem;
+    color: var(--text);
+  }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted-2);
+    font-size: 0.78rem;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  @media (max-width: 520px) {
+    main { padding: 2rem 1rem 3rem; }
+    .term-log { height: 14.5em; font-size: 0.76rem; }
+    .log-tag { width: 3.8em; }
+  }
 </style>
 </head>
 <body>
-<h1>📧 mail-monitor</h1>
-<p>Postfix / Dovecot 로그를 실시간으로 보여주는 터미널(TUI) 대시보드. <span class="badge">Go + Bubble Tea</span></p>
+<main>
 
-<h2>설치 / 업데이트</h2>
-<pre><code>curl -fsSL https://leean0121.github.io/mail-monitor/install.sh | bash</code></pre>
-<p>이미 설치된 상태에서 다시 실행하면 최신 버전으로 덮어 설치됩니다. Ubuntu/Debian용
-<code>.deb</code> 패키지를 GitHub Releases에서 받아 수동으로 <code>dpkg -i</code>도 가능합니다.
-설치된 버전 확인: <code>mail-monitor --version</code></p>
+  <div class="term">
+    <div class="term-bar">
+      <span class="term-dot r"></span>
+      <span class="term-dot y"></span>
+      <span class="term-dot g"></span>
+      <span class="term-title">jggen0121@koolsign: ~</span>
+      <span class="term-version">mail-monitor v0.11</span>
+    </div>
+    <div class="term-body">
+      <div class="term-prompt"><span class="sym">$</span> mail-monitor</div>
+      <div class="term-pills" id="pills">
+        <span class="pill login"><b>LOGIN</b><span class="n" id="n-login">0</span></span>
+        <span class="pill recv"><b>RECV</b><span class="n" id="n-recv">0</span></span>
+        <span class="pill sent"><b>SENT</b><span class="n" id="n-sent">0</span></span>
+        <span class="pill bounce"><b>BOUNCE</b><span class="n" id="n-bounce">0</span></span>
+        <span class="pill reject"><b>REJECT</b><span class="n" id="n-reject">0</span></span>
+      </div>
+      <div class="term-log" id="log" aria-hidden="true"></div>
+    </div>
+  </div>
 
-<h2>실행</h2>
-<pre><code>mail-monitor</code></pre>
-<p><code>/var/log/mail.log</code> 읽기 권한이 필요합니다. sudo 비밀번호 없이 실행하려면:</p>
-<pre><code>echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/tail" | sudo tee /etc/sudoers.d/mail-monitor</code></pre>
-<p>실행하면 최근 100줄을 이력으로 보여준 뒤 실시간으로 이어집니다. LOGIN은 가장 시끄러워
-기본적으로 목록에서 숨겨져 있습니다 (카운트는 집계됨, <code>1</code>로 토글).</p>
+  <div class="hero-copy">
+    <div class="eyebrow">postfix / dovecot log monitor</div>
+    <h1>메일 서버에 무슨 일이 있었는지,<br>터미널 한 줄로 본다.</h1>
+    <p class="lede">
+      <b>mail.log</b>를 실시간으로 읽어서 로그인·수신·발신·반송·거절을 색으로 구분해 보여준다.
+      누가, 어느 IP에서, 누구에게 — 발신자 실명 조회와 메일 제목까지.
+    </p>
+    <div class="install-row">
+      <div class="install-cmd">
+        <span class="sym">$</span>
+        <code id="install-cmd">curl -fsSL https://leean0121.github.io/mail-monitor/install.sh | bash</code>
+      </div>
+      <button class="copy-btn" id="copy-btn" type="button">copy</button>
+    </div>
+    <div class="hero-links">
+      Ubuntu/Debian용 .deb · <a href="https://github.com/LeeAn0121/mail-monitor/releases">Releases에서 수동 설치</a>
+    </div>
+  </div>
 
-<h2>메일 제목(Subject) 표시 (선택, 서버 설정 필요)</h2>
-<p>기본 로그엔 제목이 안 남습니다. <code>header_checks</code>로 Subject만 평문 노출하도록 설정하면 표시됩니다.
-⚠️ 로그에 제목이 평문으로 남으니 접근 권한/보존 정책 고려하고 적용하세요.</p>
-<p><code>/etc/postfix/header_checks</code>:</p>
-<pre><code>/^Subject:/ WARN</code></pre>
-<p><code>/etc/postfix/main.cf</code>에 추가:</p>
-<pre><code>header_checks = regexp:/etc/postfix/header_checks</code></pre>
-<p>반영 (재시작 불필요):</p>
-<pre><code>sudo postfix reload</code></pre>
+  <section>
+    <div class="section-head">
+      <span class="section-tag">01</span>
+      <h2>이벤트 다섯 가지</h2>
+    </div>
+    <div class="feature-grid">
+      <div class="feature" style="--c: var(--c-login)">
+        <div class="tag">LOGIN</div>
+        <p>누가 어디서(IP) 로그인했는지. 가장 시끄러운 이벤트라 기본은 숨김 — 필요할 때만 켠다.</p>
+      </div>
+      <div class="feature" style="--c: var(--c-recv)">
+        <div class="tag">RECV</div>
+        <p>누가 누구에게 메일을 받았는지. 발신자 IP와 이름까지 붙여서 보여준다.</p>
+      </div>
+      <div class="feature" style="--c: var(--c-sent)">
+        <div class="tag">SENT</div>
+        <p>이 서버가 밖으로 내보낸 메일. 어느 릴레이를 거쳤는지 같이 표시.</p>
+      </div>
+      <div class="feature" style="--c: var(--c-bounce)">
+        <div class="tag">BOUNCE</div>
+        <p>반송된 메일 — 왜 실패했는지 그대로 남긴다.</p>
+      </div>
+      <div class="feature" style="--c: var(--c-reject)">
+        <div class="tag">REJECT</div>
+        <p>거절당한 메일. 스팸/불법 릴레이 시도를 가장 먼저 잡아낸다.</p>
+      </div>
+    </div>
+  </section>
 
-<h2>키보드 단축키</h2>
-<table>
-<tr><th>키</th><th>기능</th></tr>
-<tr><td><code>f</code></td><td>필터/검색 (주소·IP·이름·제목)</td></tr>
-<tr><td><code>1</code>~<code>5</code></td><td>이벤트 종류 토글 (로그인/수신/송신/반송/거절)</td></tr>
-<tr><td><code>space</code></td><td>일시정지 / 재개</td></tr>
-<tr><td><code>c</code></td><td>화면 클리어</td></tr>
-<tr><td><code>q</code></td><td>종료</td></tr>
-</table>
+  <section>
+    <div class="section-head">
+      <span class="section-tag">02</span>
+      <h2>키보드</h2>
+    </div>
+    <table class="keys">
+      <tr><td><kbd>f</kbd></td><td>필터/검색 — 주소·IP·이름·제목 대상</td></tr>
+      <tr><td><kbd>1</kbd>–<kbd>5</kbd></td><td>이벤트 종류 토글</td></tr>
+      <tr><td><kbd>space</kbd></td><td>일시정지 / 재개</td></tr>
+      <tr><td><kbd>c</kbd></td><td>화면 클리어</td></tr>
+      <tr><td><kbd>q</kbd></td><td>종료</td></tr>
+    </table>
+  </section>
 
-<h2>소스</h2>
-<p><a href="https://github.com/LeeAn0121/mail-monitor">github.com/LeeAn0121/mail-monitor</a></p>
+  <section>
+    <div class="section-head">
+      <span class="section-tag">03</span>
+      <h2>옵션</h2>
+    </div>
+
+    <details class="opt">
+      <summary><span class="flag">--subject</span> 메일 제목 표시</summary>
+      <div class="opt-body">
+        <p>기본 로그엔 제목이 안 남는다. Postfix <code>header_checks</code>로 Subject만 평문 노출하도록
+        설정하면 자동으로 잡아서 보여준다. 로그에 제목이 평문으로 남으니 접근 권한을 고려할 것.</p>
+        <p><a href="https://github.com/LeeAn0121/mail-monitor#메일-제목subject-표시-선택-서버-설정-필요">설정 방법 (README)</a></p>
+      </div>
+    </details>
+
+    <details class="opt">
+      <summary><span class="flag">--names</span> 실명 조회 (MySQL)</summary>
+      <div class="opt-body">
+        <p><code>users</code> 테이블(email, name)에서 실명을 조회해 <code>이름 &lt;email&gt;</code> 형태로 보여준다.
+        DB 정보는 코드에 넣지 않고 환경변수 <code>MAIL_MONITOR_DB_DSN</code> 또는 <code>.env</code> 파일로 전달.</p>
+        <p><a href="https://github.com/LeeAn0121/mail-monitor#이름-표시-선택-mysql-조회">설정 방법 (README)</a></p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    <span>Go + Bubble Tea</span>
+    <a href="https://github.com/LeeAn0121/mail-monitor">github.com/LeeAn0121/mail-monitor</a>
+  </footer>
+
+</main>
+
+<script>
+(function () {
+  var samples = [
+    { type: "recv",   text: "<b>박지웅</b> &lt;jmpark@koolsign.net&gt; → jay1030@koolsign.net" },
+    { type: "sent",   text: "jmpark@koolsign.net → yhsohn44@outlook.com (via outlook-com...)" },
+    { type: "reject", text: "unknown[121.169.46.116] → 550 5.7.1 Relay access denied" },
+    { type: "login",  text: "<b>서은주</b> &lt;ej.seo@koolsign.net&gt; from 211.204.122.90" },
+    { type: "recv",   text: "SRS0=...=amazonses.com → jay1030@koolsign.net" },
+    { type: "bounce", text: "hslee@koolsign.net → user@invalid.xxx (User unknown)" },
+    { type: "reject", text: "unknown[172.94.9.64] → 554 5.7.1 Service unavailable" },
+    { type: "sent",   text: "hyeonu@koolsign.net → jggen0121@koolsign.net [Re: 결재요청]" },
+    { type: "recv",   text: "<b>김선일</b> &lt;seiki7788@koolsign.net&gt; → sales@koolsign.net" },
+    { type: "login",  text: "<b>박지웅</b> &lt;jmpark@koolsign.net&gt; from 220.87.58.37" }
+  ];
+
+  var logEl = document.getElementById("log");
+  var counts = { login: 0, recv: 0, sent: 0, bounce: 0, reject: 0 };
+  var MAX_LINES = 7;
+  var i = 0;
+
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+
+  function pushLine() {
+    var s = samples[i % samples.length];
+    i++;
+    counts[s.type]++;
+    document.getElementById("n-" + s.type).textContent = counts[s.type];
+
+    var now = new Date();
+    var time = pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds());
+
+    var row = document.createElement("div");
+    row.className = "log-line";
+    row.innerHTML =
+      '<span class="log-time">' + time + '</span>' +
+      '<span class="log-tag ' + s.type + '">' + s.type.toUpperCase() + '</span>' +
+      '<span class="log-text">' + s.text + '</span>';
+    logEl.appendChild(row);
+
+    while (logEl.children.length > MAX_LINES) {
+      logEl.removeChild(logEl.firstChild);
+    }
+  }
+
+  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  if (reduceMotion) {
+    for (var k = 0; k < MAX_LINES; k++) pushLine();
+  } else {
+    for (var j = 0; j < MAX_LINES; j++) pushLine();
+    setInterval(pushLine, 1400);
+  }
+
+  var btn = document.getElementById("copy-btn");
+  var cmd = document.getElementById("install-cmd").textContent;
+  btn.addEventListener("click", function () {
+    navigator.clipboard.writeText(cmd).then(function () {
+      btn.textContent = "copied";
+      btn.classList.add("copied");
+      setTimeout(function () {
+        btn.textContent = "copy";
+        btn.classList.remove("copied");
+      }, 1500);
+    });
+  });
+})();
+</script>
 </body>
 </html>
