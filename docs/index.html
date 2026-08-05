@@ -505,16 +505,16 @@
 <script>
 (function () {
   var samples = [
-    { type: "recv",   text: "발신: <b>박지웅</b> &lt;jmpark@koolsign.net&gt; (211.204.122.90) → 수신: jay1030@koolsign.net" },
-    { type: "sent",   text: "발신: jmpark@koolsign.net → 수신: yhsohn44@outlook.com (yhsohn@koolsign.net에서 전달됨) (via outlook-com...)" },
-    { type: "reject", text: "발신: spam@domain.ru (9.9.9.9) → 수신: victim@koolsign.net (554 5.7.1 Relay access denied)" },
-    { type: "login",  text: "<b>서은주</b> &lt;ej.seo@koolsign.net&gt; from 211.204.122.90" },
-    { type: "recv",   text: "발신: SRS0=...=amazonses.com → 수신: jay1030@koolsign.net" },
-    { type: "bounce", text: "발신: hslee@koolsign.net → 수신: user@invalid.xxx (User unknown)" },
-    { type: "reject", text: "발신: &lt;&gt; (172.94.9.64) → 수신: sa@koolsign.net (554 5.7.1 Service unavailable)" },
-    { type: "sent",   text: "발신: hyeonu@koolsign.net → 수신: jggen0121@koolsign.net [Re: 결재요청]" },
-    { type: "recv",   text: "발신: <b>김선일</b> &lt;seiki7788@koolsign.net&gt; → 수신: sales@koolsign.net" },
-    { type: "login",  text: "<b>박지웅</b> &lt;jmpark@koolsign.net&gt; from 220.87.58.37" }
+    { type: "recv",   text: "발신: <b>홍길동</b> &lt;hong@example.com&gt; (192.0.2.10) → 수신: kim@example.com" },
+    { type: "sent",   text: "발신: kim@example.com → 수신: partner@example.net (sales@example.com에서 전달됨) (via mx.example.net...)" },
+    { type: "reject", text: "발신: spam@example.org (198.51.100.23) → 수신: victim@example.com (554 5.7.1 Relay access denied)" },
+    { type: "login",  text: "<b>이영희</b> &lt;lee@example.com&gt; from 203.0.113.5" },
+    { type: "recv",   text: "발신: SRS0=...=shop.example.com → 수신: kim@example.com" },
+    { type: "bounce", text: "발신: choi@example.com → 수신: user@invalid.example (User unknown)" },
+    { type: "reject", text: "발신: &lt;&gt; (198.51.100.77) → 수신: sales@example.com (554 5.7.1 Service unavailable)" },
+    { type: "sent",   text: "발신: park@example.com → 수신: partner2@example.com [Re: 결재요청]" },
+    { type: "recv",   text: "발신: <b>김철수</b> &lt;chul@example.com&gt; → 수신: sales@example.com" },
+    { type: "login",  text: "<b>홍길동</b> &lt;hong@example.com&gt; from 203.0.113.5" }
   ];
 
   var logEl = document.getElementById("log");
