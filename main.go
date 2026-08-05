@@ -220,15 +220,15 @@ func (m *model) processLine(line string) *Event {
 		switch {
 		case strings.Contains(rest, "status=bounced"):
 			return &Event{When: when, Type: EventBounce, Raw: line,
-				Text: withSubject(fmt.Sprintf("발신: %s\n수신: %s", fromDisplay, to), subject)}
+				Text: withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)}
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			if isLocalRelay(relay) {
 				return &Event{When: when, Type: EventRecv, Raw: line,
-					Text: withSubject(fmt.Sprintf("발신: %s\n수신: %s", fromDisplay, to), subject)}
+					Text: withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)}
 			}
 			return &Event{When: when, Type: EventSent, Raw: line,
-				Text: withSubject(fmt.Sprintf("발신: %s\n수신: %s (via %s)", fromDisplay, to, relay), subject)}
+				Text: withSubject(fmt.Sprintf("발신: %s → 수신: %s (via %s)", fromDisplay, to, relay), subject)}
 		}
 		return nil
 	}
@@ -248,7 +248,7 @@ func (m *model) processLine(line string) *Event {
 			ip = im[1]
 		}
 		return &Event{When: when, Type: EventReject, Raw: line,
-			Text: fmt.Sprintf("발신: %s\n수신: %s (%s)", fromWithIP(from, ip), to, reason)}
+			Text: fmt.Sprintf("발신: %s → 수신: %s (%s)", fromWithIP(from, ip), to, reason)}
 	}
 	return nil
 }
