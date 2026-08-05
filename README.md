@@ -39,6 +39,9 @@ echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/tail" | sudo tee /etc/sudoers.d/mail-mo
 LOGIN은 기본적으로 목록에서 숨겨져 있다 (세션마다 로그인/로그아웃이 찍혀서 가장 시끄러움).
 카운트는 계속 집계되며, `1`로 토글하면 보인다.
 
+별칭/포워딩 규칙으로 다른 주소에 배달된 메일이면(postfix의 `orig_to=`) 수신 옆에
+원래 주소도 같이 표시된다: `수신: yhsohn44@outlook.com (yhsohn@koolsign.net에서 전달됨)`.
+
 ## 이력 검색
 
 `f`는 지금 메모리 버퍼(최근 5000건)만 검색한다. 그보다 오래된 것 — 로테이션된
@@ -116,6 +119,12 @@ sudo chmod 600 /etc/mail-monitor/.env
 | `space` | 일시정지 / 재개 |
 | `c` | 화면 클리어 |
 | `q` | 종료 |
+
+## ops/
+
+실제 운영 서버(postfix header_checks, spamassassin local.cf 추가분, unbound 리졸버 설정,
+격리 메일함 정리용 cron 스크립트)에 적용한 설정 사본을 기록용으로 보관한다. 자동 배포되는
+게 아니라 그냥 참고용 — 서버에 직접 적용해야 한다.
 
 ## 개발
 
