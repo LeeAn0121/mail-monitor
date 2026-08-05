@@ -391,7 +391,7 @@
       <span class="term-dot y"></span>
       <span class="term-dot g"></span>
       <span class="term-title">~</span>
-      <span class="term-version">mail-monitor v0.11</span>
+      <span class="term-version">mail-monitor v0.13</span>
     </div>
     <div class="term-body">
       <div class="term-prompt"><span class="sym">$</span> mail-monitor</div>
@@ -412,6 +412,7 @@
     <p class="lede">
       <b>mail.log</b>를 실시간으로 읽어서 로그인·수신·발신·반송·거절을 색으로 구분해 보여준다.
       누가, 어느 IP에서, 누구에게 — 발신자 실명 조회와 메일 제목까지.
+      로테이션된 이전 로그까지 <b>/</b>로 검색.
     </p>
     <div class="install-row">
       <div class="install-cmd">
@@ -504,15 +505,15 @@
 <script>
 (function () {
   var samples = [
-    { type: "recv",   text: "<b>박지웅</b> &lt;jmpark@koolsign.net&gt; → jay1030@koolsign.net" },
-    { type: "sent",   text: "jmpark@koolsign.net → yhsohn44@outlook.com (via outlook-com...)" },
-    { type: "reject", text: "unknown[121.169.46.116] → 550 5.7.1 Relay access denied" },
+    { type: "recv",   text: "발신: <b>박지웅</b> &lt;jmpark@koolsign.net&gt; (211.204.122.90) → 수신: jay1030@koolsign.net" },
+    { type: "sent",   text: "발신: jmpark@koolsign.net → 수신: yhsohn44@outlook.com (via outlook-com...)" },
+    { type: "reject", text: "발신: spam@domain.ru (9.9.9.9) → 수신: victim@koolsign.net (554 5.7.1 Relay access denied)" },
     { type: "login",  text: "<b>서은주</b> &lt;ej.seo@koolsign.net&gt; from 211.204.122.90" },
-    { type: "recv",   text: "SRS0=...=amazonses.com → jay1030@koolsign.net" },
-    { type: "bounce", text: "hslee@koolsign.net → user@invalid.xxx (User unknown)" },
-    { type: "reject", text: "unknown[172.94.9.64] → 554 5.7.1 Service unavailable" },
-    { type: "sent",   text: "hyeonu@koolsign.net → jggen0121@koolsign.net [Re: 결재요청]" },
-    { type: "recv",   text: "<b>김선일</b> &lt;seiki7788@koolsign.net&gt; → sales@koolsign.net" },
+    { type: "recv",   text: "발신: SRS0=...=amazonses.com → 수신: jay1030@koolsign.net" },
+    { type: "bounce", text: "발신: hslee@koolsign.net → 수신: user@invalid.xxx (User unknown)" },
+    { type: "reject", text: "발신: &lt;&gt; (172.94.9.64) → 수신: sa@koolsign.net (554 5.7.1 Service unavailable)" },
+    { type: "sent",   text: "발신: hyeonu@koolsign.net → 수신: jggen0121@koolsign.net [Re: 결재요청]" },
+    { type: "recv",   text: "발신: <b>김선일</b> &lt;seiki7788@koolsign.net&gt; → 수신: sales@koolsign.net" },
     { type: "login",  text: "<b>박지웅</b> &lt;jmpark@koolsign.net&gt; from 220.87.58.37" }
   ];
 
