@@ -439,45 +439,42 @@ func (c *cmdReadCloser) Close() error {
 }
 
 // openForScan opens path directly when readable, same as os.Open. When that
-// fails on a permission error, it falls back to `sudo cat`/`sudo zcat` (the
-// same fallback startTail uses for the live log), so history search works
-// under the same restricted-permission setups the live view already
-// tolerates. decompressed reports whether the returned reader has already
-// had gzip applied (by zcat), so the caller shouldn't gzip.NewReader it again.
-func openForScan(path string) (rc io.ReadCloser, decompressed bool, err error) {
+// fails on a permission error, it falls back to `sudo tail -c +1` — the same
+// binary (and the same NOPASSWD sudoers rule, see README) startTail already
+// relies on for the live log, so history search works without requiring a
+// second sudoers entry for cat/zcat. `-c +1` reads the whole file from byte
+// 1 as raw bytes (unlike `-n`, byte offsets don't risk mis-splitting binary
+// gzip data), so the result is identical to os.Open — .gz still needs
+// gzip.NewReader on top either way.
+func openForScan(path string) (io.ReadCloser, error) {
 	f, err := os.Open(path)
 	if err == nil {
-		return f, false, nil
+		return f, nil
 	}
 	if !os.IsPermission(err) {
-		return nil, false, err
+		return nil, err
 	}
-	name := "cat"
-	if strings.HasSuffix(path, ".gz") {
-		name = "zcat"
-		decompressed = true
-	}
-	cmd := exec.Command("sudo", "-n", name, path)
+	cmd := exec.Command("sudo", "-n", "tail", "-c", "+1", path)
 	stdout, perr := cmd.StdoutPipe()
 	if perr != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if perr := cmd.Start(); perr != nil {
-		return nil, false, err
+		return nil, err
 	}
-	return &cmdReadCloser{stdout, cmd}, decompressed, nil
+	return &cmdReadCloser{stdout, cmd}, nil
 }
 
 // scanFile reads path line by line, transparently decompressing .gz.
 func scanFile(path string, fn func(line string)) error {
-	rc, decompressed, err := openForScan(path)
+	rc, err := openForScan(path)
 	if err != nil {
 		return err
 	}
 	defer rc.Close()
 
 	var r io.Reader = rc
-	if strings.HasSuffix(path, ".gz") && !decompressed {
+	if strings.HasSuffix(path, ".gz") {
 		gz, err := gzip.NewReader(rc)
 		if err != nil {
 			return err
