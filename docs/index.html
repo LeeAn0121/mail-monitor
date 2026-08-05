@@ -391,7 +391,7 @@
       <span class="term-dot y"></span>
       <span class="term-dot g"></span>
       <span class="term-title">~</span>
-      <span class="term-version">mail-monitor v0.13</span>
+      <span class="term-version">mail-monitor v0.14</span>
     </div>
     <div class="term-body">
       <div class="term-prompt"><span class="sym">$</span> mail-monitor</div>
@@ -438,7 +438,7 @@
       </div>
       <div class="feature" style="--c: var(--c-recv)">
         <div class="tag">RECV</div>
-        <p>누가 누구에게 메일을 받았는지. 발신자 IP와 이름까지 붙여서 보여준다.</p>
+        <p>누가 누구에게 메일을 받았는지. 발신자 IP와 이름까지, 별칭/포워딩으로 온 거면 원래 주소까지 붙여서 보여준다.</p>
       </div>
       <div class="feature" style="--c: var(--c-sent)">
         <div class="tag">SENT</div>
@@ -506,7 +506,7 @@
 (function () {
   var samples = [
     { type: "recv",   text: "발신: <b>박지웅</b> &lt;jmpark@koolsign.net&gt; (211.204.122.90) → 수신: jay1030@koolsign.net" },
-    { type: "sent",   text: "발신: jmpark@koolsign.net → 수신: yhsohn44@outlook.com (via outlook-com...)" },
+    { type: "sent",   text: "발신: jmpark@koolsign.net → 수신: yhsohn44@outlook.com (yhsohn@koolsign.net에서 전달됨) (via outlook-com...)" },
     { type: "reject", text: "발신: spam@domain.ru (9.9.9.9) → 수신: victim@koolsign.net (554 5.7.1 Relay access denied)" },
     { type: "login",  text: "<b>서은주</b> &lt;ej.seo@koolsign.net&gt; from 211.204.122.90" },
     { type: "recv",   text: "발신: SRS0=...=amazonses.com → 수신: jay1030@koolsign.net" },
