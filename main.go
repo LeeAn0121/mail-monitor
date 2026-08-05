@@ -67,6 +67,7 @@ type Event struct {
 	Type EventType
 	Text string
 	Raw  string
+	From string // raw sender address, undecorated (no name/IP) — for aggregation like the sender ranking view
 }
 
 // syslogTsRe captures a line's leading syslog timestamp ("Aug  4 15:34:59").
@@ -233,15 +234,15 @@ func (m *model) processLine(line string) *Event {
 
 		switch {
 		case strings.Contains(rest, "status=bounced"):
-			return &Event{When: when, Type: EventBounce, Raw: line,
+			return &Event{When: when, Type: EventBounce, Raw: line, From: from,
 				Text: withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)}
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			if isLocalRelay(relay) {
-				return &Event{When: when, Type: EventRecv, Raw: line,
+				return &Event{When: when, Type: EventRecv, Raw: line, From: from,
 					Text: withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)}
 			}
-			return &Event{When: when, Type: EventSent, Raw: line,
+			return &Event{When: when, Type: EventSent, Raw: line, From: from,
 				Text: withSubject(fmt.Sprintf("발신: %s → 수신: %s (via %s)", fromDisplay, to, relay), subject)}
 		}
 		return nil
@@ -254,14 +255,15 @@ func (m *model) processLine(line string) *Event {
 		return &Event{When: when, Type: EventLogin, Raw: line,
 			Text: fmt.Sprintf("%s from %s", user, rip)}
 	case strings.Contains(line, "reject:"):
-		from := m.addr(extract(fromRe, line))
+		fromRaw := extract(fromRe, line)
+		from := m.addr(fromRaw)
 		to := m.addr(extract(toRe, line))
 		reason := extract(rejectRe, line)
 		ip := ""
 		if im := bracketIP.FindStringSubmatch(line); im != nil {
 			ip = im[1]
 		}
-		return &Event{When: when, Type: EventReject, Raw: line,
+		return &Event{When: when, Type: EventReject, Raw: line, From: fromRaw,
 			Text: fmt.Sprintf("발신: %s → 수신: %s (%s)", fromWithIP(from, ip), to, reason)}
 	}
 	return nil
@@ -565,6 +567,7 @@ func (m *model) addr(email string) string {
 type keyMap struct {
 	Filter  key.Binding
 	History key.Binding
+	Rank    key.Binding
 	Toggle  key.Binding
 	Pause   key.Binding
 	Clear   key.Binding
@@ -576,12 +579,12 @@ type keyMap struct {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Filter, k.History, k.Toggle, k.Pause, k.Help, k.Quit}
+	return []key.Binding{k.Filter, k.History, k.Rank, k.Toggle, k.Pause, k.Help, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Filter, k.History, k.Toggle, k.Pause, k.Clear},
+		{k.Filter, k.History, k.Rank, k.Toggle, k.Pause, k.Clear},
 		{k.Up, k.Down, k.Bottom},
 		{k.Help, k.Quit},
 	}
@@ -590,6 +593,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 var keys = keyMap{
 	Filter:  key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "필터(버퍼)")),
 	History: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "이력 검색")),
+	Rank:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "발신량 랭킹")),
 	Toggle:  key.NewBinding(key.WithKeys("1", "2", "3", "4", "5"), key.WithHelp("1-5", "이벤트 토글")),
 	Pause:   key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "정지/재개")),
 	Clear:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "클리어")),
@@ -639,6 +643,8 @@ type model struct {
 	hsQuery   string
 	hsResults []Event
 	hsErr     error
+
+	rankActive bool
 }
 
 func initialModel() model {
@@ -726,8 +732,54 @@ func (m model) historyVisible() []Event {
 	return out
 }
 
+type rankEntry struct {
+	addr  string
+	count int
+}
+
+// rankSenders aggregates SENT event counts by raw sender address, highest
+// first — a compromised account blasting spam shows up at the top.
+func rankSenders(events []Event) []rankEntry {
+	counts := make(map[string]int)
+	for _, e := range events {
+		if e.Type != EventSent || e.From == "" || e.From == "-" {
+			continue
+		}
+		counts[e.From]++
+	}
+	out := make([]rankEntry, 0, len(counts))
+	for addr, n := range counts {
+		out = append(out, rankEntry{addr, n})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].count != out[j].count {
+			return out[i].count > out[j].count
+		}
+		return out[i].addr < out[j].addr
+	})
+	return out
+}
+
+func renderRanking(entries []rankEntry) string {
+	if len(entries) == 0 {
+		return dimStyle.Render("  집계할 SENT 이벤트 없음")
+	}
+	var b strings.Builder
+	for i, e := range entries {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(fmt.Sprintf("%3d.  %4d건  %s", i+1, e.count, e.addr))
+	}
+	return b.String()
+}
+
 func (m *model) refreshViewport() {
 	if !m.ready {
+		return
+	}
+	if m.rankActive {
+		m.viewport.SetContent(renderRanking(rankSenders(m.events)))
 		return
 	}
 	if m.hsActive {
@@ -834,8 +886,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		if m.hsActive && msg.String() == "esc" {
+		if (m.hsActive || m.rankActive) && msg.String() == "esc" {
 			m.hsActive = false
+			m.rankActive = false
 			m.refreshViewport()
 			m.viewport.GotoBottom()
 			return m, nil
@@ -849,9 +902,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filterInput.Focus()
 			return m, textinput.Blink
 		case key.Matches(msg, keys.History):
+			m.rankActive = false
 			m.hsTyping = true
 			m.hsInput.Focus()
 			return m, textinput.Blink
+		case key.Matches(msg, keys.Rank):
+			m.hsActive = false
+			m.rankActive = true
+			m.refreshViewport()
+			m.viewport.GotoTop()
+			return m, nil
 		case key.Matches(msg, keys.Toggle):
 			idx := int(msg.String()[0] - '1')
 			m.enabled[idx] = !m.enabled[idx]
@@ -996,6 +1056,9 @@ func (m model) View() string {
 		if m.hsErr != nil {
 			left += "  " + errStyle.Render(m.hsErr.Error())
 		}
+	case m.rankActive:
+		left = filterLabelStyle.Render("발신량 랭킹") +
+			dimStyle.Render(" (SENT, 현재 버퍼 기준 · esc로 복귀)")
 	default:
 		filterLabel := filterLabelStyle.Render("필터 ")
 		filterVal := filterValueStyle.Render("전체")
