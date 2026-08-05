@@ -966,8 +966,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 var (
 	appBorder = lipgloss.RoundedBorder()
 
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("219"))
-	clockStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("219")).Background(lipgloss.Color("235"))
+	headerBar  = lipgloss.NewStyle().Background(lipgloss.Color("235")).Padding(0, 1)
+	dateStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Background(lipgloss.Color("235"))
+	clockStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("250")).Background(lipgloss.Color("235"))
 
 	runBadge   = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("42"))
 	pauseBadge = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("214"))
@@ -993,13 +995,17 @@ func cardStyle(color lipgloss.Color, on bool) lipgloss.Style {
 	if on {
 		return s.BorderForeground(color).Foreground(color).Bold(true)
 	}
-	return s.BorderForeground(lipgloss.Color("237")).Foreground(lipgloss.Color("240"))
+	return s.BorderForeground(lipgloss.Color("238")).Foreground(lipgloss.Color("238"))
 }
 
+// statCards renders one card per event type with a fixed-width count field
+// so a jump from single to double/triple digits (e.g. LOGIN hitting 82)
+// doesn't widen that card relative to its neighbors, and dims every card
+// whose type is currently toggled off so the active ones stand out.
 func statCards(m model) string {
 	cards := make([]string, 0, eventTypeCount)
 	for t := EventType(0); t < eventTypeCount; t++ {
-		label := fmt.Sprintf("%-6s %d", t.Label(), m.counts[t])
+		label := fmt.Sprintf("%-6s %4d", t.Label(), m.counts[t])
 		cards = append(cards, cardStyle(eventColor[t], m.enabled[t]).Render(label))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, cards...)
@@ -1190,10 +1196,11 @@ func (m model) View() string {
 
 	var b strings.Builder
 
-	// title row
-	title := titleStyle.Render("Mail Server Monitor")
-	clock := clockStyle.Render(m.now.Format("2006-01-02 15:04:05"))
-	b.WriteString(justify(m.width, title, clock))
+	// title row — solid background bar so it reads as a header, not just text
+	title := titleStyle.Render(" Mail Server Monitor ")
+	clock := dateStyle.Render(m.now.Format("2006-01-02")) + clockStyle.Render(" "+m.now.Format("15:04:05")+" ")
+	inner := justify(m.width-2, title, clock)
+	b.WriteString(headerBar.Render(inner))
 	b.WriteString("\n")
 
 	// status row
