@@ -732,7 +732,7 @@ func (m model) visibleEvents() []Event {
 }
 
 const (
-	headerHeight = 8
+	headerHeight = 9
 	footerHeight = 2
 )
 
@@ -998,15 +998,41 @@ func cardStyle(color lipgloss.Color, on bool) lipgloss.Style {
 	return s.BorderForeground(lipgloss.Color("238")).Foreground(lipgloss.Color("238"))
 }
 
+// miniBar renders a fixed-width block bar showing count's share of the
+// busiest event type right now — a quick at-a-glance read of which kind of
+// traffic currently dominates, without having to compare the raw numbers.
+func miniBar(count, maxCount, width int) string {
+	filled := 0
+	if maxCount > 0 {
+		filled = count * width / maxCount
+	}
+	if filled == 0 && count > 0 {
+		filled = 1
+	}
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+}
+
 // statCards renders one card per event type with a fixed-width count field
 // so a jump from single to double/triple digits (e.g. LOGIN hitting 82)
-// doesn't widen that card relative to its neighbors, and dims every card
-// whose type is currently toggled off so the active ones stand out.
+// doesn't widen that card relative to its neighbors, a mini bar under the
+// count showing its share of the busiest type, and dims every card whose
+// type is currently toggled off so the active ones stand out.
 func statCards(m model) string {
+	const barWidth = 10
+	maxCount := 1
+	for t := EventType(0); t < eventTypeCount; t++ {
+		if m.counts[t] > maxCount {
+			maxCount = m.counts[t]
+		}
+	}
 	cards := make([]string, 0, eventTypeCount)
 	for t := EventType(0); t < eventTypeCount; t++ {
 		label := fmt.Sprintf("%-6s %4d", t.Label(), m.counts[t])
-		cards = append(cards, cardStyle(eventColor[t], m.enabled[t]).Render(label))
+		bar := miniBar(m.counts[t], maxCount, barWidth)
+		cards = append(cards, cardStyle(eventColor[t], m.enabled[t]).Render(label+"\n"+bar))
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, cards...)
 }
