@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NimbleMarkets/ntcharts/barchart"
+	"github.com/NimbleMarkets/ntcharts/sparkline"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -424,17 +426,59 @@ func listRotatedLogs() []string {
 	return files
 }
 
+// cmdReadCloser adapts a subprocess's stdout pipe to io.ReadCloser, waiting
+// on the process (to release its resources) when the reader is closed.
+type cmdReadCloser struct {
+	io.ReadCloser
+	cmd *exec.Cmd
+}
+
+func (c *cmdReadCloser) Close() error {
+	c.ReadCloser.Close()
+	return c.cmd.Wait()
+}
+
+// openForScan opens path directly when readable, same as os.Open. When that
+// fails on a permission error, it falls back to `sudo cat`/`sudo zcat` (the
+// same fallback startTail uses for the live log), so history search works
+// under the same restricted-permission setups the live view already
+// tolerates. decompressed reports whether the returned reader has already
+// had gzip applied (by zcat), so the caller shouldn't gzip.NewReader it again.
+func openForScan(path string) (rc io.ReadCloser, decompressed bool, err error) {
+	f, err := os.Open(path)
+	if err == nil {
+		return f, false, nil
+	}
+	if !os.IsPermission(err) {
+		return nil, false, err
+	}
+	name := "cat"
+	if strings.HasSuffix(path, ".gz") {
+		name = "zcat"
+		decompressed = true
+	}
+	cmd := exec.Command("sudo", "-n", name, path)
+	stdout, perr := cmd.StdoutPipe()
+	if perr != nil {
+		return nil, false, err
+	}
+	if perr := cmd.Start(); perr != nil {
+		return nil, false, err
+	}
+	return &cmdReadCloser{stdout, cmd}, decompressed, nil
+}
+
 // scanFile reads path line by line, transparently decompressing .gz.
 func scanFile(path string, fn func(line string)) error {
-	f, err := os.Open(path)
+	rc, decompressed, err := openForScan(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer rc.Close()
 
-	var r io.Reader = f
-	if strings.HasSuffix(path, ".gz") {
-		gz, err := gzip.NewReader(f)
+	var r io.Reader = rc
+	if strings.HasSuffix(path, ".gz") && !decompressed {
+		gz, err := gzip.NewReader(rc)
 		if err != nil {
 			return err
 		}
@@ -661,6 +705,9 @@ type model struct {
 	hsErr     error
 
 	rankActive bool
+
+	spark     sparkline.Model
+	lastTotal int
 }
 
 func initialModel() model {
@@ -700,6 +747,7 @@ func initialModel() model {
 		db:          openDirectory(),
 		nameCache:   make(map[string]string),
 		hsInput:     hsi,
+		spark:       sparkline.New(40, 2, sparkline.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("214")))),
 	}
 }
 
@@ -732,9 +780,15 @@ func (m model) visibleEvents() []Event {
 }
 
 const (
-	headerHeight = 9
+	headerHeight = 12
 	footerHeight = 2
 )
+
+// trafficLabel prefixes the header sparkline (a real ntcharts sparkline, not
+// a hand-drawn bar) that tracks total events/sec so a traffic spike — a
+// broadcast landing, a flood of LOGIN retries — is visible before scrolling
+// the log at all.
+const trafficLabel = "TRAFFIC "
 
 // historyVisible applies the current type toggles (1-5) to search results;
 // the query text itself already narrowed them at scan time.
@@ -776,18 +830,67 @@ func rankSenders(events []Event) []rankEntry {
 	return out
 }
 
-func renderRanking(entries []rankEntry) string {
+// rankBarColor shades bars from the busiest sender (alert red-orange) down
+// to the quietest (the normal SENT color), so a runaway sender — the
+// clearest sign of a compromised account — visually jumps out without
+// having to read the numbers.
+func rankBarColor(rank, total int) lipgloss.Color {
+	if total <= 1 || rank == 0 {
+		return lipgloss.Color("196")
+	}
+	t := float64(rank) / float64(total-1)
+	// interpolate 196 (red) -> 214 (amber/SENT) across the field
+	return lipgloss.Color(fmt.Sprintf("%d", 196+int(t*18)))
+}
+
+const maxRankBars = 15
+
+// renderRanking draws sender volume as a real horizontal bar chart
+// (ntcharts) instead of a plain numbered list, so the relative gap between
+// the top sender and the rest reads at a glance.
+func renderRanking(entries []rankEntry, width int) string {
 	if len(entries) == 0 {
 		return dimStyle.Render("  집계할 SENT 이벤트 없음")
 	}
-	var b strings.Builder
-	for i, e := range entries {
-		if i > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString(fmt.Sprintf("%3d.  %4d건  %s", i+1, e.count, e.addr))
+	if len(entries) > maxRankBars {
+		entries = entries[:maxRankBars]
 	}
-	return b.String()
+	maxLabel := 0
+	for _, e := range entries {
+		if l := lipgloss.Width(e.addr); l > maxLabel {
+			maxLabel = l
+		}
+	}
+	if maxLabel > 34 {
+		maxLabel = 34
+	}
+	bars := make([]barchart.BarData, len(entries))
+	for i, e := range entries {
+		label := truncateToWidth(e.addr, maxLabel)
+		bars[i] = barchart.BarData{
+			Label: label,
+			Values: []barchart.BarValue{{
+				Name:  label,
+				Value: float64(e.count),
+				Style: lipgloss.NewStyle().Foreground(rankBarColor(i, len(entries))),
+			}},
+		}
+	}
+	w := width
+	if w < 24 {
+		w = 24
+	}
+	bc := barchart.New(w, len(bars),
+		barchart.WithHorizontalBars(),
+		barchart.WithBarGap(0),
+		barchart.WithStyles(dimStyle, lipgloss.NewStyle().Foreground(lipgloss.Color("250"))))
+	bc.PushAll(bars)
+	// Resize (not just Draw) is required here — it's what recomputes the
+	// axis origin from the label widths just pushed; without it every bar
+	// renders flush against the left edge with no label column at all.
+	bc.Resize(w, len(bars))
+	bc.Draw()
+	return bc.View()
 }
 
 func (m *model) refreshViewport() {
@@ -795,7 +898,7 @@ func (m *model) refreshViewport() {
 		return
 	}
 	if m.rankActive {
-		m.viewport.SetContent(renderRanking(rankSenders(m.events)))
+		m.viewport.SetContent(renderRanking(rankSenders(m.events), m.viewport.Width))
 		return
 	}
 	if m.hsActive {
@@ -817,6 +920,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if vh < 3 {
 			vh = 3
 		}
+		sparkWidth := msg.Width - lipgloss.Width(trafficLabel)
+		if sparkWidth < 10 {
+			sparkWidth = 10
+		}
+		m.spark.Resize(sparkWidth, m.spark.Height())
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, vh)
 			m.ready = true
@@ -829,6 +937,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.now = time.Time(msg)
+		total := 0
+		for t := EventType(0); t < eventTypeCount; t++ {
+			total += m.counts[t]
+		}
+		m.spark.Push(float64(total - m.lastTotal))
+		m.spark.Draw()
+		m.lastTotal = total
 		return m, tick()
 
 	case tailErrMsg:
@@ -1113,6 +1228,24 @@ func splitForwardNote(recipient string) (email, note string) {
 	return recipient, ""
 }
 
+// namedAddrRe matches the "이름 <email>" form m.addr() produces when a users
+// table lookup resolves a real name for the address.
+var namedAddrRe = regexp.MustCompile(`^(.+) <[^>]+>$`)
+
+// shortRecipient reduces a recipient (possibly "이름 <email>" if resolveName
+// found a match, otherwise a bare email) to the short form used in a grouped
+// broadcast's recipient list: the resolved name when there is one, otherwise
+// just the local part (domain dropped).
+func shortRecipient(s string) string {
+	if m := namedAddrRe.FindStringSubmatch(s); m != nil {
+		return m[1]
+	}
+	if idx := strings.LastIndex(s, "@"); idx > 0 {
+		return s[:idx]
+	}
+	return s
+}
+
 // groupRecvBroadcasts folds consecutive RECV events that share a timestamp,
 // sender, and subject — the same message BCC'd/expanded to several local
 // mailboxes at once (a newsletter, an alias fan-out) — into three lines:
@@ -1140,11 +1273,7 @@ func groupRecvBroadcasts(events []Event) []Event {
 		}
 		locals := make([]string, len(emails))
 		for i, email := range emails {
-			local := email
-			if idx := strings.LastIndex(email, "@"); idx > 0 {
-				local = email[:idx]
-			}
-			locals[i] = local
+			locals[i] = shortRecipient(email)
 		}
 		summary := fmt.Sprintf("%s%d명", prefix, len(recips))
 		if sharedNote != "" {
@@ -1256,6 +1385,10 @@ func (m model) View() string {
 
 	// stat cards
 	b.WriteString(statCards(m))
+	b.WriteString("\n")
+
+	// traffic sparkline — total events/sec over the last window
+	b.WriteString(dimStyle.Render(trafficLabel) + m.spark.View())
 	b.WriteString("\n")
 
 	if m.err != nil {
