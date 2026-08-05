@@ -1,0 +1,2 @@
+/^Subject:/ WARN
+/^X-Spam-Flag: YES$/ REDIRECT spam-quarantine@koolsign.net
