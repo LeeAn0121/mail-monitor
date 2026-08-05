@@ -98,6 +98,7 @@ var (
 	ripRe     = regexp.MustCompile(`rip=([0-9.]+)`)
 	fromRe    = regexp.MustCompile(`from=<([^>]*)>`)
 	toRe      = regexp.MustCompile(`to=<([^>]*)>`)
+	origToRe  = regexp.MustCompile(`orig_to=<([^>]*)>`)
 	relayRe   = regexp.MustCompile(`relay=([^,\s]*)`)
 	rejectRe  = regexp.MustCompile(`reject:\s*([^;]*)`)
 	clientRe  = regexp.MustCompile(`client=\S+\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
@@ -129,6 +130,16 @@ func fromWithIP(from, ip string) string {
 		return from
 	}
 	return fmt.Sprintf("%s (%s)", from, ip)
+}
+
+// toWithForward notes when postfix delivered to a different mailbox than
+// the message was originally addressed to — an alias or forwarding rule
+// expanded it (postfix logs this as orig_to=, alongside the final to=).
+func toWithForward(to, origTo string) string {
+	if origTo == "" || origTo == to {
+		return to
+	}
+	return fmt.Sprintf("%s (%s에서 전달됨)", to, origTo)
 }
 
 // mimeWordDecoder decodes RFC 2047 encoded-words (e.g. "=?ks_c_5601-1987?B?...?=",
@@ -210,6 +221,9 @@ func (m *model) processLine(line string) *Event {
 			return nil
 		}
 		to := m.addr(toRaw)
+		if om := origToRe.FindStringSubmatch(rest); om != nil && om[1] != "" {
+			to = toWithForward(to, m.addr(om[1]))
+		}
 		from, ok := m.qidFrom[qid]
 		if !ok {
 			from = "-"
