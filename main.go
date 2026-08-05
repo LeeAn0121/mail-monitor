@@ -143,6 +143,20 @@ func toWithForward(to, origTo string) string {
 	return fmt.Sprintf("%s (%s에서 전달됨)", to, origTo)
 }
 
+// srsRe matches an SRS-rewritten bounce address (SRS0=hash=TT=domain=local@relay),
+// which postfix/OpenSMTPD generates so bounces route back through the
+// forwarding relay. The rewritten form is long and mostly noise for a human
+// reader — shortenSRS pulls out the original local@domain it was rewritten
+// from so the display stays short.
+var srsRe = regexp.MustCompile(`^SRS0=[^=]+=[^=]+=([^=]+)=([^@]+)@`)
+
+func shortenSRS(addr string) string {
+	if m := srsRe.FindStringSubmatch(addr); m != nil {
+		return m[2] + "@" + m[1]
+	}
+	return addr
+}
+
 // mimeWordDecoder decodes RFC 2047 encoded-words (e.g. "=?ks_c_5601-1987?B?...?=",
 // common for Korean subjects) into UTF-8, resolving legacy MIME charset
 // names like ks_c_5601-1987 (EUC-KR) via the IANA charset registry.
@@ -175,7 +189,9 @@ func decodeSubject(s string) string {
 	return s
 }
 
-// withSubject appends a truncated [Subject] suffix when known.
+// withSubject appends a truncated [Subject] as its own continuation line,
+// rather than tacking it onto the sender/recipient line, so a long address
+// and a long subject don't compete for the same line width.
 func withSubject(text, subject string) string {
 	if subject == "" {
 		return text
@@ -184,7 +200,7 @@ func withSubject(text, subject string) string {
 	if r := []rune(subject); len(r) > maxLen {
 		subject = string(r[:maxLen]) + "…"
 	}
-	return fmt.Sprintf("%s [%s]", text, subject)
+	return fmt.Sprintf("%s\n[%s]", text, subject)
 }
 
 // processLine parses one mail.log line into an Event. Postfix logs a
@@ -229,7 +245,7 @@ func (m *model) processLine(line string) *Event {
 		if !ok {
 			from = "-"
 		}
-		fromDisplay := fromWithIP(m.addr(from), m.qidIP[qid])
+		fromDisplay := fromWithIP(m.addr(shortenSRS(from)), m.qidIP[qid])
 		subject := m.qidSubject[qid]
 
 		switch {
@@ -256,7 +272,7 @@ func (m *model) processLine(line string) *Event {
 			Text: fmt.Sprintf("%s from %s", user, rip)}
 	case strings.Contains(line, "reject:"):
 		fromRaw := extract(fromRe, line)
-		from := m.addr(fromRaw)
+		from := m.addr(shortenSRS(fromRaw))
 		to := m.addr(extract(toRe, line))
 		reason := extract(rejectRe, line)
 		ip := ""
@@ -1032,10 +1048,73 @@ func colorizeLine(s string) string {
 	return s
 }
 
+// recvLineParts splits a RECV event's Text into the "발신: X → 수신: " prefix,
+// the recipient that follows it on the same line, and an optional subject
+// continuation line — the pieces groupRecvBroadcasts needs to fold repeated
+// deliveries of one broadcast message into a single line.
+func recvLineParts(e Event) (prefix, recipient, subject string, ok bool) {
+	if e.Type != EventRecv {
+		return "", "", "", false
+	}
+	lines := strings.SplitN(e.Text, "\n", 2)
+	const marker = "수신: "
+	idx := strings.Index(lines[0], marker)
+	if idx == -1 {
+		return "", "", "", false
+	}
+	prefix = lines[0][:idx+len(marker)]
+	recipient = lines[0][idx+len(marker):]
+	if len(lines) > 1 {
+		subject = lines[1]
+	}
+	return prefix, recipient, subject, true
+}
+
+// groupRecvBroadcasts folds consecutive RECV events that share a timestamp,
+// sender, and subject — the same message BCC'd/expanded to several local
+// mailboxes at once (a newsletter, an alias fan-out) — into a single
+// "수신 N명: a, b, c" line instead of repeating the sender block per recipient.
+func groupRecvBroadcasts(events []Event) []Event {
+	out := make([]Event, 0, len(events))
+	var groupKey string
+	var recips []string
+	var prefix, subject string
+	flush := func() {
+		if len(recips) < 2 {
+			return
+		}
+		text := fmt.Sprintf("%s%d명: %s", prefix, len(recips), strings.Join(recips, ", "))
+		if subject != "" {
+			text += "\n" + subject
+		}
+		out[len(out)-1].Text = text
+	}
+	for _, e := range events {
+		p, r, s, ok := recvLineParts(e)
+		if !ok {
+			flush()
+			groupKey = ""
+			out = append(out, e)
+			continue
+		}
+		key := e.When + "\x00" + p + "\x00" + s
+		if key == groupKey {
+			recips = append(recips, r)
+			continue
+		}
+		flush()
+		groupKey, prefix, subject, recips = key, p, s, []string{r}
+		out = append(out, e)
+	}
+	flush()
+	return out
+}
+
 func renderEvents(events []Event, width int, emptyMsg string) string {
 	if len(events) == 0 {
 		return dimStyle.Render("  " + emptyMsg)
 	}
+	events = groupRecvBroadcasts(events)
 	maxText := width - len(continuationIndent)
 	if maxText < 20 {
 		maxText = 20
