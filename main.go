@@ -1070,10 +1070,24 @@ func recvLineParts(e Event) (prefix, recipient, subject string, ok bool) {
 	return prefix, recipient, subject, true
 }
 
+// forwardNoteRe splits a toWithForward recipient like "hslee@koolsign.net
+// (management@koolsign.net에서 전달됨)" into the bare email and the note.
+var forwardNoteRe = regexp.MustCompile(`^(.*) \((.+에서 전달됨)\)$`)
+
+func splitForwardNote(recipient string) (email, note string) {
+	if m := forwardNoteRe.FindStringSubmatch(recipient); m != nil {
+		return m[1], m[2]
+	}
+	return recipient, ""
+}
+
 // groupRecvBroadcasts folds consecutive RECV events that share a timestamp,
 // sender, and subject — the same message BCC'd/expanded to several local
 // mailboxes at once (a newsletter, an alias fan-out) — into a single
-// "수신 N명: a, b, c" line instead of repeating the sender block per recipient.
+// "수신: N명 (a, b, c)" line instead of repeating the sender block per
+// recipient. Within the group, recipient domains are dropped (they're
+// invariably the same local domain) and a forwarding note shared by every
+// recipient is hoisted onto the subject line instead of repeated per name.
 func groupRecvBroadcasts(events []Event) []Event {
 	out := make([]Event, 0, len(events))
 	var groupKey string
@@ -1083,9 +1097,40 @@ func groupRecvBroadcasts(events []Event) []Event {
 		if len(recips) < 2 {
 			return
 		}
-		text := fmt.Sprintf("%s%d명: %s", prefix, len(recips), strings.Join(recips, ", "))
+		emails := make([]string, len(recips))
+		notes := make([]string, len(recips))
+		uniform := true
+		for i, r := range recips {
+			emails[i], notes[i] = splitForwardNote(r)
+			if notes[i] != notes[0] {
+				uniform = false
+			}
+		}
+		sharedNote := ""
+		if uniform {
+			sharedNote = notes[0]
+		}
+		locals := make([]string, len(emails))
+		for i, email := range emails {
+			local := email
+			if idx := strings.LastIndex(email, "@"); idx > 0 {
+				local = email[:idx]
+			}
+			if sharedNote == "" && notes[i] != "" {
+				local += "(" + notes[i] + ")"
+			}
+			locals[i] = local
+		}
+		text := fmt.Sprintf("%s%d명 (%s)", prefix, len(recips), strings.Join(locals, ", "))
+		var tail []string
 		if subject != "" {
-			text += "\n" + subject
+			tail = append(tail, subject)
+		}
+		if sharedNote != "" {
+			tail = append(tail, "("+sharedNote+")")
+		}
+		if len(tail) > 0 {
+			text += "\n" + strings.Join(tail, " ")
 		}
 		out[len(out)-1].Text = text
 	}
