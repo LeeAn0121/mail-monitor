@@ -1,0 +1,10 @@
+# koolsign.net 운영 서버 /etc/mail/spamassassin/local.cf 에 추가한 항목
+# (기본 SpamAssassin 템플릿 뒤에 이어서 추가함, 전체 파일 아님)
+
+# Spamhaus DNS 조회가 공용 리졸버(OpenDNS)에서 차단되던 문제 —
+# unbound 로컬 리졸버(127.0.0.1:5353, ops/unbound/spamassassin.conf 참고)로 우회
+dns_server 127.0.0.1:5353
+
+# URIBL_BLACK은 실제 블랙리스트 URL 히트인데 DNSWL/RP_CERTIFIED 화이트리스트
+# 점수에 묻혀서 required_score(5.0)를 못 넘기던 문제 — 가중치 올림
+score URIBL_BLACK 8.0
