@@ -1420,12 +1420,16 @@ func (m model) View() string {
 // for service deployments, then the current directory for local runs.
 var envFilePaths = []string{"/etc/mail-monitor/.env", ".env"}
 
-// loadEnvFile loads the first .env file found. godotenv.Load never
-// overwrites variables already set in the process environment.
+// loadEnvFile loads the first .env file that's actually readable.
+// godotenv.Load never overwrites variables already set in the process
+// environment. It's tempting to gate this on os.Stat first, but stat only
+// needs directory search permission — it can succeed on a file the process
+// then can't open (e.g. root:root, mode 600, run as a regular user), and
+// stopping at that path would silently skip the working fallback below it.
+// Trying Load directly on every candidate avoids that trap.
 func loadEnvFile() {
 	for _, path := range envFilePaths {
-		if _, err := os.Stat(path); err == nil {
-			godotenv.Load(path)
+		if err := godotenv.Load(path); err == nil {
 			return
 		}
 	}
