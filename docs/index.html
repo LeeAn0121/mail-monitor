@@ -391,7 +391,7 @@
       <span class="term-dot y"></span>
       <span class="term-dot g"></span>
       <span class="term-title">~</span>
-      <span class="term-version">mail-monitor v0.14</span>
+      <span class="term-version">mail-monitor v0.15</span>
     </div>
     <div class="term-body">
       <div class="term-prompt"><span class="sym">$</span> mail-monitor</div>
@@ -412,7 +412,8 @@
     <p class="lede">
       <b>mail.log</b>를 실시간으로 읽어서 로그인·수신·발신·반송·거절을 색으로 구분해 보여준다.
       누가, 어느 IP에서, 누구에게 — 발신자 실명 조회와 메일 제목까지.
-      로테이션된 이전 로그까지 <b>/</b>로 검색.
+      로테이션된 이전 로그까지 <b>/</b>로 검색. <b>r</b>로 발신량 랭킹 — 탈취된 계정이
+      스팸을 뿌리기 시작하면 바로 눈에 띈다.
     </p>
     <div class="install-row">
       <div class="install-cmd">
@@ -463,6 +464,7 @@
     <table class="keys">
       <tr><td><kbd>f</kbd></td><td>필터 — 메모리 버퍼(최근 5000건) 대상</td></tr>
       <tr><td><kbd>/</kbd></td><td>이력 검색 — 디스크의 mail.log + 로테이션 로그 대상</td></tr>
+      <tr><td><kbd>r</kbd></td><td>발신량 랭킹 — SENT를 발신자별로 집계</td></tr>
       <tr><td><kbd>1</kbd>–<kbd>5</kbd></td><td>이벤트 종류 토글</td></tr>
       <tr><td><kbd>space</kbd></td><td>일시정지 / 재개</td></tr>
       <tr><td><kbd>c</kbd></td><td>화면 클리어</td></tr>
