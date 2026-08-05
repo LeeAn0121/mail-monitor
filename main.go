@@ -1005,23 +1005,55 @@ func justify(width int, left, right string) string {
 // padded label, separators).
 const continuationIndent = "                        "
 
+// truncateToWidth cuts s to fit within max display cells (wide runes like
+// Korean count as 2), appending an ellipsis, so a long SRS0=... address or
+// subject can't push the line into an ugly wrap.
+func truncateToWidth(s string, max int) string {
+	if lipgloss.Width(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	for i := len(r); i > 0; i-- {
+		cand := string(r[:i]) + "…"
+		if lipgloss.Width(cand) <= max {
+			return cand
+		}
+	}
+	return "…"
+}
+
+// colorizeLine dims the literal "발신:"/"수신:" labels so the addresses
+// after them stand out more. Runs after truncation only — it inserts ANSI
+// codes, and truncating a string that already contains them could slice
+// through an escape sequence.
+func colorizeLine(s string) string {
+	s = strings.Replace(s, "발신: ", dimStyle.Render("발신:")+" ", 1)
+	s = strings.Replace(s, " 수신: ", " "+dimStyle.Render("수신:")+" ", 1)
+	return s
+}
+
 func renderEvents(events []Event, width int, emptyMsg string) string {
 	if len(events) == 0 {
 		return dimStyle.Render("  " + emptyMsg)
+	}
+	maxText := width - len(continuationIndent)
+	if maxText < 20 {
+		maxText = 20
 	}
 	var b strings.Builder
 	for i, e := range events {
 		style := lipgloss.NewStyle().Foreground(eventColor[e.Type])
 		bar := style.Render("|")
 		lines := strings.Split(e.Text, "\n")
+		first := colorizeLine(truncateToWidth(lines[0], maxText))
 		b.WriteString(fmt.Sprintf("%s %s %-6s %s",
 			bar, dimStyle.Render(e.When),
-			style.Bold(true).Render(e.Type.Label()), lines[0]))
+			style.Bold(true).Render(e.Type.Label()), first))
 		for _, l := range lines[1:] {
-			b.WriteString("\n" + continuationIndent + l)
+			b.WriteString("\n" + continuationIndent + colorizeLine(truncateToWidth(l, maxText)))
 		}
 		if i < len(events)-1 {
-			b.WriteString("\n")
+			b.WriteString("\n\n")
 		}
 	}
 	return b.String()
