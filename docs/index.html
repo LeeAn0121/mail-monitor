@@ -413,7 +413,7 @@
       <span class="term-dot y"></span>
       <span class="term-dot g"></span>
       <span class="term-title">~</span>
-      <span class="term-version">mail-monitor v0.18.2</span>
+      <span class="term-version">mail-monitor v0.18.3</span>
     </div>
     <div class="term-body">
       <div class="term-prompt"><span class="sym">$</span> mail-monitor</div>
@@ -501,7 +501,7 @@
     </div>
 
     <details class="opt">
-      <summary><span class="flag">--subject</span> 메일 제목 표시</summary>
+      <summary><span class="flag">Subject</span> 메일 제목 표시</summary>
       <div class="opt-body">
         <p>기본 로그엔 제목이 안 남는다. Postfix <code>header_checks</code>로 Subject만 평문 노출하도록
         설정하면 자동으로 잡아서 보여준다. 로그에 제목이 평문으로 남으니 접근 권한을 고려할 것.</p>
@@ -510,7 +510,7 @@
     </details>
 
     <details class="opt">
-      <summary><span class="flag">--names</span> 실명 조회 (MySQL)</summary>
+      <summary><span class="flag">MAIL_MONITOR_DB_DSN</span> 실명 조회 (MySQL)</summary>
       <div class="opt-body">
         <p><code>users</code> 테이블(email, name)에서 실명을 조회해 <code>이름 &lt;email&gt;</code> 형태로 보여준다.
         DB 정보는 코드에 넣지 않고 환경변수 <code>MAIL_MONITOR_DB_DSN</code> 또는 <code>.env</code> 파일로 전달.</p>
