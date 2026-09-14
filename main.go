@@ -70,6 +70,18 @@ type Event struct {
 	Text string
 	Raw  string
 	From string // raw sender address, undecorated (no name/IP) — for aggregation like the sender ranking view
+
+	// rawLower/textLower cache strings.ToLower(Raw)/(Text), computed once at
+	// construction, so matchesFilter doesn't re-lowercase every event on
+	// every keystroke/render pass.
+	rawLower  string
+	textLower string
+}
+
+// newEvent builds an Event and precomputes its lowercase filter-match cache.
+func newEvent(when string, typ EventType, raw, from, text string) *Event {
+	return &Event{When: when, Type: typ, Raw: raw, From: from, Text: text,
+		rawLower: strings.ToLower(raw), textLower: strings.ToLower(text)}
 }
 
 // syslogTsRe captures a line's leading syslog timestamp ("Aug  4 15:34:59").
@@ -252,16 +264,16 @@ func (m *model) processLine(line string) *Event {
 
 		switch {
 		case strings.Contains(rest, "status=bounced"):
-			return &Event{When: when, Type: EventBounce, Raw: line, From: from,
-				Text: withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)}
+			return newEvent(when, EventBounce, line, from,
+				withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject))
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			if isLocalRelay(relay) {
-				return &Event{When: when, Type: EventRecv, Raw: line, From: from,
-					Text: withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)}
+				return newEvent(when, EventRecv, line, from,
+					withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject))
 			}
-			return &Event{When: when, Type: EventSent, Raw: line, From: from,
-				Text: withSubject(fmt.Sprintf("발신: %s → 수신: %s (via %s)", fromDisplay, to, relay), subject)}
+			return newEvent(when, EventSent, line, from,
+				withSubject(fmt.Sprintf("발신: %s → 수신: %s (via %s)", fromDisplay, to, relay), subject))
 		}
 		return nil
 	}
@@ -270,8 +282,7 @@ func (m *model) processLine(line string) *Event {
 	case loginRe.MatchString(line):
 		user := m.addr(extract(userRe, line))
 		rip := extract(ripRe, line)
-		return &Event{When: when, Type: EventLogin, Raw: line,
-			Text: fmt.Sprintf("%s from %s", user, rip)}
+		return newEvent(when, EventLogin, line, "", fmt.Sprintf("%s from %s", user, rip))
 	case strings.Contains(line, "reject:"):
 		fromRaw := extract(fromRe, line)
 		from := m.addr(shortenSRS(fromRaw))
@@ -281,15 +292,15 @@ func (m *model) processLine(line string) *Event {
 		if im := bracketIP.FindStringSubmatch(line); im != nil {
 			ip = im[1]
 		}
-		return &Event{When: when, Type: EventReject, Raw: line, From: fromRaw,
-			Text: fmt.Sprintf("발신: %s → 수신: %s (%s)", fromWithIP(from, ip), to, reason)}
+		return newEvent(when, EventReject, line, fromRaw,
+			fmt.Sprintf("발신: %s → 수신: %s (%s)", fromWithIP(from, ip), to, reason))
 	}
 	return nil
 }
 
 // --- log tailing ---
 
-type logLineMsg string
+type logLineMsg []string
 type tailErrMsg error
 type tickMsg time.Time
 
@@ -512,7 +523,12 @@ func searchHistory(db *sql.DB, query string) historyResultsMsg {
 	}
 
 	needle := strings.ToLower(query)
-	var results []Event
+	// ring holds only the last maxHistoryResults matches. Rather than
+	// shifting the slice left on every overflow (O(n) per match, O(n²) over
+	// a large scan), write into a fixed-size circular buffer — O(1) per
+	// match — and reorder into chronological order once at the end.
+	ring := make([]Event, maxHistoryResults)
+	total := 0
 	var lastErr error
 	opened := 0
 
@@ -522,14 +538,12 @@ func searchHistory(db *sql.DB, query string) historyResultsMsg {
 			if ev == nil {
 				return
 			}
-			if needle != "" && !strings.Contains(strings.ToLower(ev.Raw), needle) &&
-				!strings.Contains(strings.ToLower(ev.Text), needle) {
+			if needle != "" && !strings.Contains(ev.rawLower, needle) &&
+				!strings.Contains(ev.textLower, needle) {
 				return
 			}
-			results = append(results, *ev)
-			if len(results) > maxHistoryResults {
-				results = results[1:]
-			}
+			ring[total%maxHistoryResults] = *ev
+			total++
 		})
 		if err != nil {
 			lastErr = err
@@ -541,6 +555,14 @@ func searchHistory(db *sql.DB, query string) historyResultsMsg {
 	if opened == 0 && lastErr != nil {
 		return historyResultsMsg{query: query, err: lastErr}
 	}
+	var results []Event
+	if total <= maxHistoryResults {
+		results = ring[:total]
+	} else {
+		start := total % maxHistoryResults
+		results = append(results, ring[start:]...)
+		results = append(results, ring[:start]...)
+	}
 	return historyResultsMsg{query: query, events: results}
 }
 
@@ -550,9 +572,27 @@ func searchHistoryCmd(db *sql.DB, query string) tea.Cmd {
 	}
 }
 
+// waitForLine blocks for the first available line, then drains any further
+// lines already buffered on the channel (non-blocking) into the same batch,
+// up to lineBatchLimit. A busy server can log faster than bubbletea's
+// Update/View cycle — without batching, each line triggers its own full
+// refreshViewport() (rescans/regroups every visible event), which turns a
+// burst of N lines into O(N * visibleEvents) work instead of O(N + one
+// refresh).
+const lineBatchLimit = 200
+
 func waitForLine(ch <-chan string) tea.Cmd {
 	return func() tea.Msg {
-		return logLineMsg(<-ch)
+		batch := []string{<-ch}
+		for len(batch) < lineBatchLimit {
+			select {
+			case l := <-ch:
+				batch = append(batch, l)
+			default:
+				return logLineMsg(batch)
+			}
+		}
+		return logLineMsg(batch)
 	}
 }
 
@@ -761,8 +801,8 @@ func (m model) matchesFilter(e Event) bool {
 		return true
 	}
 	needle := strings.ToLower(m.filter)
-	return strings.Contains(strings.ToLower(e.Raw), needle) ||
-		strings.Contains(strings.ToLower(e.Text), needle)
+	return strings.Contains(e.rawLower, needle) ||
+		strings.Contains(e.textLower, needle)
 }
 
 // visibleEvents returns events passing the current type/filter settings.
@@ -952,12 +992,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.paused {
 			return m, cmd
 		}
-		if ev := m.processLine(string(msg)); ev != nil {
-			m.counts[ev.Type]++
-			m.events = append(m.events, *ev)
-			if len(m.events) > maxEvents {
-				m.events = m.events[len(m.events)-maxEvents:]
+		changed := false
+		for _, line := range msg {
+			if ev := m.processLine(line); ev != nil {
+				m.counts[ev.Type]++
+				m.events = append(m.events, *ev)
+				changed = true
 			}
+		}
+		if len(m.events) > maxEvents {
+			m.events = m.events[len(m.events)-maxEvents:]
+		}
+		if changed {
 			m.refreshViewport()
 		}
 		return m, cmd
