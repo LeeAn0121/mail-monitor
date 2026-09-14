@@ -338,23 +338,20 @@ type logLineMsg []string
 type tailErrMsg error
 type tickMsg time.Time
 
-// historyLines is how many recent lines nativeTail replays as history on
-// startup, before switching to pure live-follow. A busy server's log can
-// have hundreds of thousands of lines (dovecot alone logs a login+logout
-// pair per IMAP session), so this must stay small or it reads as a flood.
-const historyLines = 100
+// todayDatePrefix returns today's date in the same "Jan _2" form syslogTsRe
+// captures, so history replay can match it against each line's leading
+// timestamp without a full time.Parse round-trip per line.
+func todayDatePrefix() string {
+	return time.Now().Format("Jan _2")
+}
 
-// historyScanBytes is how far back we look to find those last historyLines
-// lines — generous relative to typical line length, cheap to read regardless
-// of how large logPath has grown since rotation.
-const historyScanBytes = 256 * 1024
-
-// nativeTail replays the last historyLines lines of logPath as history, then
-// follows only new appends from that point on — it never rescans or reprints
-// old lines during live-follow. This also avoids the startup race of handing
-// off to an external `tail` process (which may not have attached before the
-// first lines land) and lets us read the file directly when permissions
-// allow (no sudo).
+// nativeTail replays today's lines of logPath as history — the whole day so
+// far, not a fixed line count, since startup is meant to answer "what's
+// happened today" — then follows only new appends from that point on; it
+// never rescans or reprints old lines during live-follow. This also avoids
+// the startup race of handing off to an external `tail` process (which may
+// not have attached before the first lines land) and lets us read the file
+// directly when permissions allow (no sudo).
 func nativeTail(ch chan<- string, errCh chan<- error) {
 	f, err := os.Open(logPath)
 	if err != nil {
@@ -363,26 +360,15 @@ func nativeTail(ch chan<- string, errCh chan<- error) {
 	}
 	defer f.Close()
 
-	if fi, err := f.Stat(); err == nil {
-		start := int64(0)
-		if fi.Size() > historyScanBytes {
-			start = fi.Size() - historyScanBytes
-		}
-		f.Seek(start, io.SeekStart)
+	if _, err := f.Stat(); err == nil {
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-		var recent []string
+		today := todayDatePrefix()
 		for scanner.Scan() {
-			recent = append(recent, scanner.Text())
-		}
-		if start > 0 && len(recent) > 0 {
-			recent = recent[1:] // drop the partial line at our scan start
-		}
-		if len(recent) > historyLines {
-			recent = recent[len(recent)-historyLines:]
-		}
-		for _, l := range recent {
-			ch <- l
+			line := scanner.Text()
+			if m := syslogTsRe.FindStringSubmatch(line); m != nil && strings.HasPrefix(m[1], today) {
+				ch <- line
+			}
 		}
 	}
 	f.Seek(0, io.SeekEnd)
@@ -405,8 +391,16 @@ func nativeTail(ch chan<- string, errCh chan<- error) {
 }
 
 func subprocessTail(ch chan<- string, errCh chan<- error) {
-	// -n 100 matches nativeTail's historyLines: recent history, then follow.
-	cmd := exec.Command("sudo", "tail", "-F", "-n", fmt.Sprint(historyLines), logPath)
+	// Mirrors nativeTail's today-only history replay when direct read isn't
+	// permitted: grep today's lines via sudo first, then follow new appends.
+	if out, err := exec.Command("sudo", "grep", "-a", "^"+todayDatePrefix(), logPath).Output(); err == nil {
+		for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+			if l != "" {
+				ch <- l
+			}
+		}
+	}
+	cmd := exec.Command("sudo", "tail", "-F", "-n", "0", logPath)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		errCh <- err
