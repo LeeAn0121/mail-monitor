@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"mime"
@@ -43,6 +44,7 @@ const (
 	EventLogin EventType = iota
 	EventRecv
 	EventSent
+	EventForward
 	EventBounce
 	EventReject
 	eventTypeCount
@@ -56,6 +58,8 @@ func (e EventType) Label() string {
 		return "RECV"
 	case EventSent:
 		return "SENT"
+	case EventForward:
+		return "FWD"
 	case EventBounce:
 		return "BOUNCE"
 	case EventReject:
@@ -75,6 +79,8 @@ func (e EventType) Glyph() string {
 		return "▼"
 	case EventSent:
 		return "▲"
+	case EventForward:
+		return "↪"
 	case EventBounce:
 		return "✕"
 	case EventReject:
@@ -89,6 +95,7 @@ type Event struct {
 	Text string
 	Raw  string
 	From string // raw sender address, undecorated (no name/IP) — for aggregation like the sender ranking view
+	To   string // raw recipient address, undecorated — for aggregation like the receiver ranking view
 
 	// rawLower/textLower cache strings.ToLower(Raw)/(Text), computed once at
 	// construction, so matchesFilter doesn't re-lowercase every event on
@@ -98,8 +105,8 @@ type Event struct {
 }
 
 // newEvent builds an Event and precomputes its lowercase filter-match cache.
-func newEvent(when string, typ EventType, raw, from, text string) *Event {
-	return &Event{When: when, Type: typ, Raw: raw, From: from, Text: text,
+func newEvent(when string, typ EventType, raw, from, to, text string) *Event {
+	return &Event{When: when, Type: typ, Raw: raw, From: from, To: to, Text: text,
 		rawLower: strings.ToLower(raw), textLower: strings.ToLower(text)}
 }
 
@@ -271,8 +278,11 @@ func (m *model) processLine(line string) *Event {
 			return nil
 		}
 		to := m.addr(toRaw)
+		forwarded := false
 		if om := origToRe.FindStringSubmatch(rest); om != nil && om[1] != "" {
-			to = toWithForward(to, m.addr(om[1]))
+			origTo := m.addr(om[1])
+			forwarded = origTo != to
+			to = toWithForward(to, origTo)
 		}
 		from, ok := m.qidFrom[qid]
 		if !ok {
@@ -283,15 +293,19 @@ func (m *model) processLine(line string) *Event {
 
 		switch {
 		case strings.Contains(rest, "status=bounced"):
-			return newEvent(when, EventBounce, line, from,
+			return newEvent(when, EventBounce, line, from, toRaw,
 				withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject))
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			if isLocalRelay(relay) {
-				return newEvent(when, EventRecv, line, from,
+				typ := EventRecv
+				if forwarded {
+					typ = EventForward
+				}
+				return newEvent(when, typ, line, from, toRaw,
 					withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject))
 			}
-			return newEvent(when, EventSent, line, from,
+			return newEvent(when, EventSent, line, from, toRaw,
 				withSubject(fmt.Sprintf("발신: %s → 수신: %s (via %s)", fromDisplay, to, relay), subject))
 		}
 		return nil
@@ -301,17 +315,18 @@ func (m *model) processLine(line string) *Event {
 	case loginRe.MatchString(line):
 		user := m.addr(extract(userRe, line))
 		rip := extract(ripRe, line)
-		return newEvent(when, EventLogin, line, "", fmt.Sprintf("%s from %s", user, rip))
+		return newEvent(when, EventLogin, line, "", "", fmt.Sprintf("%s from %s", user, rip))
 	case strings.Contains(line, "reject:"):
 		fromRaw := extract(fromRe, line)
 		from := m.addr(shortenSRS(fromRaw))
-		to := m.addr(extract(toRe, line))
+		toRaw := extract(toRe, line)
+		to := m.addr(toRaw)
 		reason := extract(rejectRe, line)
 		ip := ""
 		if im := bracketIP.FindStringSubmatch(line); im != nil {
 			ip = im[1]
 		}
-		return newEvent(when, EventReject, line, fromRaw,
+		return newEvent(when, EventReject, line, fromRaw, toRaw,
 			fmt.Sprintf("발신: %s → 수신: %s (%s)", fromWithIP(from, ip), to, reason))
 	}
 	return nil
@@ -681,17 +696,19 @@ func (m *model) addr(email string) string {
 // --- keymap ---
 
 type keyMap struct {
-	Filter  key.Binding
-	History key.Binding
-	Rank    key.Binding
-	Toggle  key.Binding
-	Pause   key.Binding
-	Clear   key.Binding
-	Bottom  key.Binding
-	Up      key.Binding
-	Down    key.Binding
-	Help    key.Binding
-	Quit    key.Binding
+	Filter   key.Binding
+	History  key.Binding
+	Rank     key.Binding
+	RankRecv key.Binding
+	Export   key.Binding
+	Toggle   key.Binding
+	Pause    key.Binding
+	Clear    key.Binding
+	Bottom   key.Binding
+	Up       key.Binding
+	Down     key.Binding
+	Help     key.Binding
+	Quit     key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -700,24 +717,26 @@ func (k keyMap) ShortHelp() []key.Binding {
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Filter, k.History, k.Rank, k.Toggle, k.Pause, k.Clear},
+		{k.Filter, k.History, k.Rank, k.RankRecv, k.Export, k.Toggle, k.Pause, k.Clear},
 		{k.Up, k.Down, k.Bottom},
 		{k.Help, k.Quit},
 	}
 }
 
 var keys = keyMap{
-	Filter:  key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "필터(버퍼)")),
-	History: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "이력 검색")),
-	Rank:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "발신량 랭킹")),
-	Toggle:  key.NewBinding(key.WithKeys("1", "2", "3", "4", "5"), key.WithHelp("1-5", "이벤트 토글")),
-	Pause:   key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "정지/재개")),
-	Clear:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "클리어")),
-	Bottom:  key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "최신으로")),
-	Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "스크롤")),
-	Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "스크롤")),
-	Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "도움말")),
-	Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "종료")),
+	Filter:   key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "필터(버퍼)")),
+	History:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "이력 검색")),
+	Rank:     key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "발신량 랭킹")),
+	RankRecv: key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "수신량 랭킹")),
+	Export:   key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "CSV 내보내기")),
+	Toggle:   key.NewBinding(key.WithKeys("1", "2", "3", "4", "5", "6"), key.WithHelp("1-6", "이벤트 토글")),
+	Pause:    key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "정지/재개")),
+	Clear:    key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "클리어")),
+	Bottom:   key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "최신으로")),
+	Up:       key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "스크롤")),
+	Down:     key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "스크롤")),
+	Help:     key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "도움말")),
+	Quit:     key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "종료")),
 }
 
 // --- model ---
@@ -761,9 +780,21 @@ type model struct {
 	hsErr     error
 
 	rankActive bool
+	rankByRecv bool // false = sender ranking (SENT), true = receiver ranking (RECV/FORWARD)
+
+	// exportMsg/exportAt show a transient status-bar confirmation (or error)
+	// after pressing e; the message clears itself once exportMsgTTL elapses.
+	exportMsg string
+	exportAt  time.Time
 
 	spark     sparkline.Model
 	lastTotal int
+
+	// lastBadTotal/alertUntil drive a spike warning: when BOUNCE+REJECT grows
+	// by bounceRejectSpikeThreshold or more within one tick (a burst, not
+	// steady background noise), a warning badge shows for alertBadgeTTL.
+	lastBadTotal int
+	alertUntil   time.Time
 
 	// pendingNew counts events buffered while paused or scrolled away from
 	// the tail (followTail == false) — a "new events" cue so nothing that
@@ -846,6 +877,15 @@ const (
 	footerHeight = 2
 )
 
+// bounceRejectSpikeThreshold/alertBadgeTTL tune the spike-warning badge:
+// a burst of at least this many new BOUNCE+REJECT events within one tick
+// (1s) triggers the badge, which then stays up for alertBadgeTTL so a
+// glance at the screen a few seconds later still catches it.
+const (
+	bounceRejectSpikeThreshold = 3
+	alertBadgeTTL              = 10 * time.Second
+)
+
 // trafficLabel prefixes the header sparkline (a real ntcharts sparkline, not
 // a hand-drawn bar) that tracks total events/sec so a traffic spike — a
 // broadcast landing, a flood of LOGIN retries — is visible before scrolling
@@ -869,15 +909,17 @@ type rankEntry struct {
 	count int
 }
 
-// rankSenders aggregates SENT event counts by raw sender address, highest
-// first — a compromised account blasting spam shows up at the top.
-func rankSenders(events []Event) []rankEntry {
+// rankByKey aggregates events matching keep, keyed by key(e), highest count
+// first — the shared engine behind both the sender and receiver rankings.
+func rankByKey(events []Event, keep func(Event) bool, key func(Event) string) []rankEntry {
 	counts := make(map[string]int)
 	for _, e := range events {
-		if e.Type != EventSent || e.From == "" || e.From == "-" {
+		if !keep(e) {
 			continue
 		}
-		counts[e.From]++
+		if k := key(e); k != "" && k != "-" {
+			counts[k]++
+		}
 	}
 	out := make([]rankEntry, 0, len(counts))
 	for addr, n := range counts {
@@ -890,6 +932,23 @@ func rankSenders(events []Event) []rankEntry {
 		return out[i].addr < out[j].addr
 	})
 	return out
+}
+
+// rankSenders aggregates SENT event counts by raw sender address, highest
+// first — a compromised account blasting spam shows up at the top.
+func rankSenders(events []Event) []rankEntry {
+	return rankByKey(events,
+		func(e Event) bool { return e.Type == EventSent },
+		func(e Event) string { return e.From })
+}
+
+// rankReceivers aggregates RECV/FORWARD event counts by raw recipient
+// address, highest first — surfaces mailboxes receiving unusual volume,
+// including ones only reachable via a forwarding alias.
+func rankReceivers(events []Event) []rankEntry {
+	return rankByKey(events,
+		func(e Event) bool { return e.Type == EventRecv || e.Type == EventForward },
+		func(e Event) string { return e.To })
 }
 
 // rankBarColor shades bars from the busiest sender (alert red-orange) down
@@ -910,9 +969,9 @@ const maxRankBars = 15
 // renderRanking draws sender volume as a real horizontal bar chart
 // (ntcharts) instead of a plain numbered list, so the relative gap between
 // the top sender and the rest reads at a glance.
-func renderRanking(entries []rankEntry, width int) string {
+func renderRanking(entries []rankEntry, width int, emptyMsg string) string {
 	if len(entries) == 0 {
-		return dimStyle.Render("  집계할 SENT 이벤트 없음")
+		return dimStyle.Render("  " + emptyMsg)
 	}
 	if len(entries) > maxRankBars {
 		entries = entries[:maxRankBars]
@@ -960,7 +1019,11 @@ func (m *model) refreshViewport() {
 		return
 	}
 	if m.rankActive {
-		m.viewport.SetContent(renderRanking(rankSenders(m.events), m.viewport.Width))
+		if m.rankByRecv {
+			m.viewport.SetContent(renderRanking(rankReceivers(m.events), m.viewport.Width, "집계할 RECV/FWD 이벤트 없음"))
+		} else {
+			m.viewport.SetContent(renderRanking(rankSenders(m.events), m.viewport.Width, "집계할 SENT 이벤트 없음"))
+		}
 		return
 	}
 	if m.hsActive {
@@ -1006,6 +1069,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spark.Push(float64(total - m.lastTotal))
 		m.spark.Draw()
 		m.lastTotal = total
+
+		badTotal := m.counts[EventBounce] + m.counts[EventReject]
+		if badTotal-m.lastBadTotal >= bounceRejectSpikeThreshold {
+			m.alertUntil = m.now.Add(alertBadgeTTL)
+		}
+		m.lastBadTotal = badTotal
 		return m, tick()
 
 	case tailErrMsg:
@@ -1108,6 +1177,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.Rank):
 			m.hsActive = false
 			m.rankActive = true
+			m.rankByRecv = false
+			m.refreshViewport()
+			m.viewport.GotoTop()
+			return m, nil
+		case key.Matches(msg, keys.RankRecv):
+			m.hsActive = false
+			m.rankActive = true
+			m.rankByRecv = true
 			m.refreshViewport()
 			m.viewport.GotoTop()
 			return m, nil
@@ -1115,6 +1192,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			idx := int(msg.String()[0] - '1')
 			m.enabled[idx] = !m.enabled[idx]
 			m.refreshViewport()
+			return m, nil
+		case key.Matches(msg, keys.Export):
+			var toExport []Event
+			if m.hsActive {
+				toExport = m.historyVisible()
+			} else {
+				toExport = m.visibleEvents()
+			}
+			path, err := exportEvents(toExport)
+			m.exportAt = time.Now()
+			if err != nil {
+				m.exportMsg = "내보내기 실패: " + err.Error()
+			} else {
+				m.exportMsg = fmt.Sprintf("내보냄: %s (%d건)", path, len(toExport))
+			}
 			return m, nil
 		case key.Matches(msg, keys.Pause):
 			m.paused = !m.paused
@@ -1166,6 +1258,7 @@ var (
 	runBadge   = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("42"))
 	pauseBadge = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("214"))
 	newBadge   = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("219"))
+	alertBadge = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("231")).Background(lipgloss.Color("196"))
 
 	filterLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	filterValueStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("117"))
@@ -1175,11 +1268,12 @@ var (
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Italic(true)
 
 	eventColor = map[EventType]lipgloss.Color{
-		EventLogin:  lipgloss.Color("75"),
-		EventRecv:   lipgloss.Color("42"),
-		EventSent:   lipgloss.Color("214"),
-		EventBounce: lipgloss.Color("203"),
-		EventReject: lipgloss.Color("161"),
+		EventLogin:   lipgloss.Color("75"),
+		EventRecv:    lipgloss.Color("42"),
+		EventSent:    lipgloss.Color("214"),
+		EventForward: lipgloss.Color("117"),
+		EventBounce:  lipgloss.Color("203"),
+		EventReject:  lipgloss.Color("161"),
 	}
 )
 
@@ -1230,6 +1324,51 @@ func statCards(m model) string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, cards...)
 }
 
+// exportEvents writes events to a timestamped CSV file in the current
+// directory, one row per event with its multi-line Text flattened to " | "
+// so it survives a single CSV field, and returns the path written.
+func exportEvents(events []Event) (string, error) {
+	path := fmt.Sprintf("mail-monitor-%s.csv", time.Now().Format("20060102-150405"))
+	f, err := os.Create(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	w := csv.NewWriter(f)
+	if err := w.Write([]string{"When", "Type", "From", "To", "Text"}); err != nil {
+		return "", err
+	}
+	for _, e := range events {
+		row := []string{e.When, e.Type.Label(), e.From, e.To, strings.ReplaceAll(e.Text, "\n", " | ")}
+		if err := w.Write(row); err != nil {
+			return "", err
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// enabledTypesSummary renders one dimmed/colored glyph per event type so the
+// currently active 1-6 toggles are visible in the status bar itself, not
+// just inferable from which stat cards look dim.
+func enabledTypesSummary(m model) string {
+	var b strings.Builder
+	for t := EventType(0); t < eventTypeCount; t++ {
+		g := t.Glyph()
+		if m.enabled[t] {
+			b.WriteString(lipgloss.NewStyle().Foreground(eventColor[t]).Render(g))
+		} else {
+			b.WriteString(dimStyle.Render(g))
+		}
+		b.WriteString(" ")
+	}
+	return dimStyle.Render("표시:") + " " + strings.TrimRight(b.String(), " ")
+}
+
 // justify lays `left` and `right` across `width`, padding the gap.
 func justify(width int, left, right string) string {
 	lw, rw := lipgloss.Width(left), lipgloss.Width(right)
@@ -1278,7 +1417,7 @@ func colorizeLine(s string) string {
 // continuation line — the pieces groupRecvBroadcasts needs to fold repeated
 // deliveries of one broadcast message into a single line.
 func recvLineParts(e Event) (prefix, recipient, subject string, ok bool) {
-	if e.Type != EventRecv {
+	if e.Type != EventRecv && e.Type != EventForward {
 		return "", "", "", false
 	}
 	lines := strings.SplitN(e.Text, "\n", 2)
@@ -1436,6 +1575,9 @@ func (m model) View() string {
 	if m.pendingNew > 0 {
 		status = newBadge.Render(fmt.Sprintf("▲ 새 이벤트 %d건", m.pendingNew)) + " " + status
 	}
+	if m.now.Before(m.alertUntil) {
+		status = alertBadge.Render("⚠ BOUNCE/REJECT 급증") + " " + status
+	}
 
 	var left string
 	switch {
@@ -1447,6 +1589,9 @@ func (m model) View() string {
 		if m.hsErr != nil {
 			left += "  " + errStyle.Render(m.hsErr.Error())
 		}
+	case m.rankActive && m.rankByRecv:
+		left = filterLabelStyle.Render("수신량 랭킹") +
+			dimStyle.Render(" (RECV/FWD, 현재 버퍼 기준 · esc로 복귀)")
 	case m.rankActive:
 		left = filterLabelStyle.Render("발신량 랭킹") +
 			dimStyle.Render(" (SENT, 현재 버퍼 기준 · esc로 복귀)")
@@ -1456,10 +1601,13 @@ func (m model) View() string {
 		if m.filter != "" {
 			filterVal = filterValueStyle.Render(m.filter)
 		}
-		left = filterLabel + filterVal
+		left = filterLabel + filterVal + "  " + enabledTypesSummary(m)
 		if !m.followTail {
 			left += "  " + dimStyle.Render("(스크롤 중 · G로 최신 이동)")
 		}
+	}
+	if m.exportMsg != "" && time.Since(m.exportAt) < 3*time.Second {
+		left += "  " + filterValueStyle.Render(m.exportMsg)
 	}
 	b.WriteString(justify(m.width, left, status))
 	b.WriteString("\n")
