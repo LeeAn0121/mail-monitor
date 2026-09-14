@@ -64,6 +64,25 @@ func (e EventType) Label() string {
 	return "?"
 }
 
+// Glyph gives each event type a distinct shape, not just a color, so the
+// log stays readable for colorblind users (RECV green vs. BOUNCE red is a
+// hard pair for red-green colorblindness to tell apart on hue alone).
+func (e EventType) Glyph() string {
+	switch e {
+	case EventLogin:
+		return "●"
+	case EventRecv:
+		return "▼"
+	case EventSent:
+		return "▲"
+	case EventBounce:
+		return "✕"
+	case EventReject:
+		return "■"
+	}
+	return "?"
+}
+
 type Event struct {
 	When string // e.g. "08-04 15:34:59", taken from the log line itself
 	Type EventType
@@ -745,6 +764,12 @@ type model struct {
 
 	spark     sparkline.Model
 	lastTotal int
+
+	// pendingNew counts events buffered while paused or scrolled away from
+	// the tail (followTail == false) — a "new events" cue so nothing that
+	// arrived off-screen goes unnoticed. Reset once the view returns to the
+	// live tail.
+	pendingNew int
 }
 
 func initialModel() model {
@@ -989,21 +1014,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logLineMsg:
 		cmd := waitForLine(m.lineCh)
-		if m.paused {
-			return m, cmd
-		}
 		changed := false
 		for _, line := range msg {
 			if ev := m.processLine(line); ev != nil {
 				m.counts[ev.Type]++
 				m.events = append(m.events, *ev)
 				changed = true
+				if m.paused || !m.followTail {
+					m.pendingNew++
+				}
 			}
 		}
 		if len(m.events) > maxEvents {
 			m.events = m.events[len(m.events)-maxEvents:]
 		}
-		if changed {
+		if changed && !m.paused {
 			m.refreshViewport()
 		}
 		return m, cmd
@@ -1093,16 +1118,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case key.Matches(msg, keys.Pause):
 			m.paused = !m.paused
+			if !m.paused {
+				m.refreshViewport()
+				m.pendingNew = 0
+			}
 			return m, nil
 		case key.Matches(msg, keys.Clear):
 			m.events = nil
 			for i := range m.counts {
 				m.counts[i] = 0
 			}
+			m.pendingNew = 0
 			m.refreshViewport()
 			return m, nil
 		case key.Matches(msg, keys.Bottom):
 			m.followTail = true
+			m.pendingNew = 0
 			m.viewport.GotoBottom()
 			return m, nil
 		case key.Matches(msg, keys.Help):
@@ -1113,6 +1144,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.viewport, cmd = m.viewport.Update(msg)
 			m.followTail = m.viewport.AtBottom()
+			if m.followTail {
+				m.pendingNew = 0
+			}
 			return m, cmd
 		}
 	}
@@ -1131,6 +1165,7 @@ var (
 
 	runBadge   = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("42"))
 	pauseBadge = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("214"))
+	newBadge   = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color("232")).Background(lipgloss.Color("219"))
 
 	filterLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	filterValueStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("117"))
@@ -1188,7 +1223,7 @@ func statCards(m model) string {
 	}
 	cards := make([]string, 0, eventTypeCount)
 	for t := EventType(0); t < eventTypeCount; t++ {
-		label := fmt.Sprintf("%-6s %4d", t.Label(), m.counts[t])
+		label := fmt.Sprintf("%s %-6s %4d", t.Glyph(), t.Label(), m.counts[t])
 		bar := miniBar(m.counts[t], maxCount, barWidth)
 		cards = append(cards, cardStyle(eventColor[t], m.enabled[t]).Render(label+"\n"+bar))
 	}
@@ -1363,7 +1398,7 @@ func renderEvents(events []Event, width int, emptyMsg string) string {
 	var b strings.Builder
 	for i, e := range events {
 		style := lipgloss.NewStyle().Foreground(eventColor[e.Type])
-		bar := style.Render("|")
+		bar := style.Render(e.Type.Glyph())
 		lines := strings.Split(e.Text, "\n")
 		first := colorizeLine(truncateToWidth(lines[0], maxText))
 		b.WriteString(fmt.Sprintf("%s %s %-6s %s",
@@ -1397,6 +1432,9 @@ func (m model) View() string {
 	status := runBadge.Render("RUNNING")
 	if m.paused {
 		status = pauseBadge.Render("PAUSED")
+	}
+	if m.pendingNew > 0 {
+		status = newBadge.Render(fmt.Sprintf("▲ 새 이벤트 %d건", m.pendingNew)) + " " + status
 	}
 
 	var left string
