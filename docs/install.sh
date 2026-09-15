@@ -9,14 +9,12 @@ case "$(uname -m)" in
   *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;
 esac
 
-echo "==> fetching latest release info"
-API_URL="https://api.github.com/repos/${REPO}/releases/latest"
-DEB_URL=$(curl -fsSL "$API_URL" | grep -o "\"browser_download_url\": *\"[^\"]*_linux_${ARCH}\.deb\"" | sed -E 's/.*"(https[^"]+)"/\1/')
-
-if [ -z "$DEB_URL" ]; then
-  echo "could not find a .deb asset for arch ${ARCH} in latest release" >&2
-  exit 1
-fi
+# Goes straight through github.com's releases/latest/download redirect
+# instead of calling api.github.com/repos/.../releases/latest — the asset
+# filename has no version in it specifically so this URL never changes.
+# That avoids api.github.com's unauthenticated rate limit, which is easy to
+# hit from a shared/NAT IP and shows up as a plain curl 403.
+DEB_URL="https://github.com/${REPO}/releases/latest/download/mail-monitor_linux_${ARCH}.deb"
 
 TMP_DEB=$(mktemp --suffix=.deb)
 echo "==> downloading ${DEB_URL}"

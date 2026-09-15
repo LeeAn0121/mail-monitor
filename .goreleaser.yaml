@@ -30,6 +30,12 @@ archives:
 nfpms:
   - id: mail-monitor-deb
     package_name: mail-monitor
+    # No version in the filename, unlike the archives above — install.sh
+    # downloads this via GitHub's releases/latest/download/<name> redirect,
+    # which needs a name that's stable release to release. That path skips
+    # the api.github.com/releases/latest call entirely, so it isn't subject
+    # to that endpoint's (much stricter) unauthenticated rate limit.
+    file_name_template: "{{ .ProjectName }}_linux_{{ .Arch }}"
     vendor: koolsign
     homepage: https://LeeAn0121.github.io/mail-monitor/
     maintainer: LeeAn0121 <koolsignpad@gmail.com>
