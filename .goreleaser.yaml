@@ -45,6 +45,11 @@ nfpms:
     contents:
       - src: ./README.md
         dst: /usr/share/doc/mail-monitor/README.md
+      - src: ./ops/systemd/mail-monitor.service
+        dst: /lib/systemd/system/mail-monitor.service
+    scripts:
+      postinstall: ./ops/systemd/postinstall.sh
+      preremove: ./ops/systemd/preremove.sh
 
 checksum:
   name_template: "checksums.txt"

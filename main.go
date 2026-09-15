@@ -1675,6 +1675,43 @@ func loadEnvFile() {
 	}
 }
 
+// runDaemon runs the log-tailing/parsing core without the bubbletea TUI —
+// for the systemd service, which has no terminal to attach to. It reuses
+// model.processLine (and the same webState/sseHub mirroring) so the parsing
+// logic never forks between the two run modes.
+func runDaemon(ws *webState, hub *sseHub) {
+	m := initialModel(ws, hub)
+	go startTail(m.lineCh, m.errCh)
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case line := <-m.lineCh:
+			if ev := m.processLine(line); ev != nil {
+				m.counts[ev.Type]++
+				m.events = append(m.events, *ev)
+				if len(m.events) > maxEvents {
+					m.events = m.events[len(m.events)-maxEvents:]
+				}
+				ws.addEvent(*ev)
+				hub.broadcastEvent(*ev)
+			}
+		case <-ticker.C:
+			badTotal := m.counts[EventBounce] + m.counts[EventReject]
+			if badTotal-m.lastBadTotal >= bounceRejectSpikeThreshold {
+				m.alertUntil = time.Now().Add(alertBadgeTTL)
+				ws.setAlertUntil(m.alertUntil)
+			}
+			m.lastBadTotal = badTotal
+		case err := <-m.errCh:
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+}
+
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
 		fmt.Println("mail-monitor " + version)
@@ -1687,6 +1724,11 @@ func main() {
 	hub := newSSEHub()
 	if addr := webAddr(); addr != "" {
 		startWebServer(addr, ws, hub)
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "--daemon" {
+		runDaemon(ws, hub)
+		return
 	}
 
 	p := tea.NewProgram(initialModel(ws, hub), tea.WithAltScreen())

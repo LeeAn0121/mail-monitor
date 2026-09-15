@@ -36,11 +36,21 @@ echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/tail" | sudo tee /etc/sudoers.d/mail-mo
 
 ## 웹 대시보드
 
-TUI와 별개로 `http://localhost:8080` 에서 실시간 대시보드를 볼 수 있다 (React + MUI,
-Pretendard 폰트). mail-monitor 실행과 동시에 항상 뜨며, 끄거나 포트를 바꾸려면:
+`.deb`로 설치하면 `mail-monitor.service`가 systemd에 등록되어 부팅 시 자동으로 뜨고,
+`http://localhost:8080` 에서 실시간 대시보드를 볼 수 있다 (React + MUI, Pretendard 폰트).
+헤드리스로 동작하므로(`mail-monitor --daemon`) 터미널을 안 열어도 항상 살아있다.
 
 ```bash
-MAIL_MONITOR_WEB_ADDR=off mail-monitor        # 웹 대시보드 끄기
+sudo systemctl status mail-monitor     # 서비스 상태
+sudo systemctl restart mail-monitor    # 재시작
+journalctl -u mail-monitor -f          # 로그
+```
+
+터미널에서 `mail-monitor`를 직접 실행하면 TUI가 뜬다. 서비스가 이미 8080을 쓰고 있으므로
+TUI에서 웹서버를 다시 띄우고 싶지 않으면 `MAIL_MONITOR_WEB_ADDR=off`로 끄고 실행:
+
+```bash
+MAIL_MONITOR_WEB_ADDR=off mail-monitor        # TUI만, 웹서버 끄기
 MAIL_MONITOR_WEB_ADDR=:9090 mail-monitor      # 포트 변경
 ```
 

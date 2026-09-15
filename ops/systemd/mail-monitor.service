@@ -1,0 +1,13 @@
+[Unit]
+Description=mail-monitor web dashboard (headless)
+After=network.target rsyslog.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/mail-monitor --daemon
+Restart=on-failure
+RestartSec=2
+EnvironmentFile=-/etc/mail-monitor/mail-monitor.env
+
+[Install]
+WantedBy=multi-user.target
