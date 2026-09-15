@@ -5,7 +5,7 @@ import { ThemeProvider } from "@mui/material/styles";
 // Variable font, single ~2MB woff2 file covering every weight — far lighter
 // to embed into the Go binary than the static per-weight (or subset) builds,
 // which multiply into dozens/hundreds of files.
-import "pretendard/dist/web/variable/PretendardVariable.css";
+import "pretendard/dist/web/variable/pretendardvariable.css";
 import theme from "./theme";
 import App from "./App";
 
