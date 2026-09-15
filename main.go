@@ -795,9 +795,14 @@ type model struct {
 	// arrived off-screen goes unnoticed. Reset once the view returns to the
 	// live tail.
 	pendingNew int
+
+	// webState/webHub feed the live web dashboard: every parsed event and
+	// spike-alert update mirrors into them alongside the TUI's own state.
+	webState *webState
+	webHub   *sseHub
 }
 
-func initialModel() model {
+func initialModel(ws *webState, hub *sseHub) model {
 	ti := textinput.New()
 	ti.Placeholder = "user@domain.com"
 	ti.CharLimit = 128
@@ -835,6 +840,8 @@ func initialModel() model {
 		nameCache:   make(map[string]string),
 		hsInput:     hsi,
 		spark:       sparkline.New(40, 2, sparkline.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("214")))),
+		webState:    ws,
+		webHub:      hub,
 	}
 }
 
@@ -1067,6 +1074,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		badTotal := m.counts[EventBounce] + m.counts[EventReject]
 		if badTotal-m.lastBadTotal >= bounceRejectSpikeThreshold {
 			m.alertUntil = m.now.Add(alertBadgeTTL)
+			if m.webState != nil {
+				m.webState.setAlertUntil(m.alertUntil)
+			}
 		}
 		m.lastBadTotal = badTotal
 		return m, tick()
@@ -1085,6 +1095,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				changed = true
 				if m.paused || !m.followTail {
 					m.pendingNew++
+				}
+				if m.webState != nil {
+					m.webState.addEvent(*ev)
+					m.webHub.broadcastEvent(*ev)
 				}
 			}
 		}
@@ -1669,7 +1683,13 @@ func main() {
 
 	loadEnvFile()
 
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	ws := newWebState()
+	hub := newSSEHub()
+	if addr := webAddr(); addr != "" {
+		startWebServer(addr, ws, hub)
+	}
+
+	p := tea.NewProgram(initialModel(ws, hub), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

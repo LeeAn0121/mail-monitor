@@ -31,8 +31,21 @@ mail-monitor
 echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/tail" | sudo tee /etc/sudoers.d/mail-monitor
 ```
 
-실행 시 최근 100줄 이력을 먼저 보여준 뒤 실시간 tail로 이어진다. LOGIN은 기본적으로
+실행 시 오늘 하루치 이력을 먼저 보여준 뒤 실시간 tail로 이어진다. LOGIN은 기본적으로
 숨겨져 있으며 `1`로 토글한다.
+
+## 웹 대시보드
+
+TUI와 별개로 `http://localhost:8080` 에서 실시간 대시보드를 볼 수 있다 (React + MUI,
+Pretendard 폰트). mail-monitor 실행과 동시에 항상 뜨며, 끄거나 포트를 바꾸려면:
+
+```bash
+MAIL_MONITOR_WEB_ADDR=off mail-monitor        # 웹 대시보드 끄기
+MAIL_MONITOR_WEB_ADDR=:9090 mail-monitor      # 포트 변경
+```
+
+프론트엔드는 Go 바이너리에 임베드되어 있어 별도 배포 없이 단일 바이너리로 동작한다.
+소스는 `web/`에 있으며, 수정 후 `cd web && npm run build`로 다시 빌드해야 바이너리에 반영된다.
 
 ## 이력 검색
 

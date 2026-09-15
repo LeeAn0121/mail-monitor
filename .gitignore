@@ -1,5 +1,12 @@
 mail-monitor
-dist/
+/dist/
 .idea/
 .claude/
 .env
+
+# React dashboard: web/dist/index.html is a checked-in placeholder so
+# `go build` always has something to embed (see webserver.go); npm run
+# build overwrites it with the real bundle, which stays untracked.
+web/node_modules/
+web/dist/assets/
+web/*.tsbuildinfo
