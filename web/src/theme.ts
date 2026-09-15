@@ -1,29 +1,39 @@
 import { createTheme } from "@mui/material/styles";
 
-// Event-type accent colors, kept in sync with the TUI's own palette
-// (main.go's lipgloss styles) so the web dashboard reads as the same tool.
+// mail-monitor's web dashboard mirrors the TUI it sits beside: a dense,
+// terminal-native console rather than a generic SaaS panel. Status color
+// carries meaning (per event type) rather than decorating cards, dividers
+// stay hairline-thin, and corners stay sharp — the vernacular of a log
+// viewer, not a marketing dashboard.
 export const eventColors: Record<string, string> = {
-  LOGIN: "#8a8fa3",
-  RECV: "#4caf82",
-  SENT: "#5b9bd5",
-  FWD: "#c98bd9",
-  BOUNCE: "#e5484d",
-  REJECT: "#e8912d",
+  LOGIN: "#7c8894",
+  RECV: "#3ddc84",
+  SENT: "#4ea1ff",
+  FWD: "#b58cff",
+  BOUNCE: "#ff5c5c",
+  REJECT: "#ffb454",
 };
+
+export const monoFont = "'JetBrains Mono', 'SFMono-Regular', Consolas, monospace";
 
 const theme = createTheme({
   palette: {
     mode: "dark",
     background: {
-      default: "#0d1117",
-      paper: "#151b23",
+      default: "#0a0e12",
+      paper: "#10151b",
     },
-    primary: { main: "#5b9bd5" },
-    error: { main: "#e5484d" },
-    warning: { main: "#e8912d" },
-    success: { main: "#4caf82" },
-    divider: "rgba(255,255,255,0.08)",
+    text: {
+      primary: "#d6dee5",
+      secondary: "#6b7885",
+    },
+    primary: { main: "#4ea1ff" },
+    error: { main: "#ff5c5c" },
+    warning: { main: "#ffb454" },
+    success: { main: "#3ddc84" },
+    divider: "#1e2730",
   },
+  shape: { borderRadius: 3 },
   typography: {
     fontFamily: [
       "Pretendard Variable",
@@ -32,12 +42,17 @@ const theme = createTheme({
       "system-ui",
       "sans-serif",
     ].join(","),
+    button: { textTransform: "none", fontWeight: 600 },
   },
-  shape: { borderRadius: 10 },
   components: {
     MuiPaper: {
       styleOverrides: {
         root: { backgroundImage: "none" },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: { borderRadius: 3 },
       },
     },
   },

@@ -6,8 +6,14 @@ import { ThemeProvider } from "@mui/material/styles";
 // to embed into the Go binary than the static per-weight (or subset) builds,
 // which multiply into dozens/hundreds of files.
 import "pretendard/dist/web/variable/pretendardvariable.css";
+// Monospace face for log data (timestamps, addresses, counts) — a log
+// viewer's numbers and addresses read better fixed-width, distinct from the
+// Pretendard UI chrome around them.
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
 import theme from "./theme";
 import App from "./App";
+import "./print.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

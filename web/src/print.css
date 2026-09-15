@@ -1,0 +1,11 @@
+@media print {
+  nav {
+    display: none !important;
+  }
+  .log-scroll {
+    overflow: visible !important;
+  }
+  body {
+    background: #fff !important;
+  }
+}

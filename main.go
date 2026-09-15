@@ -802,7 +802,7 @@ type model struct {
 	webHub   *sseHub
 }
 
-func initialModel(ws *webState, hub *sseHub) model {
+func initialModel(ws *webState, hub *sseHub, db *sql.DB) model {
 	ti := textinput.New()
 	ti.Placeholder = "user@domain.com"
 	ti.CharLimit = 128
@@ -836,7 +836,7 @@ func initialModel(ws *webState, hub *sseHub) model {
 		qidFrom:     make(map[string]string),
 		qidIP:       make(map[string]string),
 		qidSubject:  make(map[string]string),
-		db:          openDirectory(),
+		db:          db,
 		nameCache:   make(map[string]string),
 		hsInput:     hsi,
 		spark:       sparkline.New(40, 2, sparkline.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("214")))),
@@ -1679,8 +1679,8 @@ func loadEnvFile() {
 // for the systemd service, which has no terminal to attach to. It reuses
 // model.processLine (and the same webState/sseHub mirroring) so the parsing
 // logic never forks between the two run modes.
-func runDaemon(ws *webState, hub *sseHub) {
-	m := initialModel(ws, hub)
+func runDaemon(ws *webState, hub *sseHub, db *sql.DB) {
+	m := initialModel(ws, hub, db)
 	go startTail(m.lineCh, m.errCh)
 
 	ticker := time.NewTicker(time.Second)
@@ -1720,18 +1720,19 @@ func main() {
 
 	loadEnvFile()
 
+	db := openDirectory()
 	ws := newWebState()
 	hub := newSSEHub()
 	if addr := webAddr(); addr != "" {
-		startWebServer(addr, ws, hub)
+		startWebServer(addr, ws, hub, db)
 	}
 
 	if len(os.Args) > 1 && os.Args[1] == "--daemon" {
-		runDaemon(ws, hub)
+		runDaemon(ws, hub, db)
 		return
 	}
 
-	p := tea.NewProgram(initialModel(ws, hub), tea.WithAltScreen())
+	p := tea.NewProgram(initialModel(ws, hub, db), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

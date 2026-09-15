@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -210,13 +211,33 @@ func webAddr() string {
 // startWebServer runs the dashboard's HTTP server in the background for the
 // lifetime of the process. Errors (e.g. port already in use) are reported to
 // stderr rather than crashing mail-monitor — the TUI keeps working either way.
-func startWebServer(addr string, state *webState, hub *sseHub) {
+func startWebServer(addr string, state *webState, hub *sseHub, db *sql.DB) {
 	mux := http.NewServeMux()
 	mux.Handle("/", webDistHandler())
 
 	mux.HandleFunc("/api/snapshot", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(state.snapshot())
+	})
+
+	// /api/history scans logPath + rotated logs on disk (via the same
+	// searchHistory the TUI's `/` search uses) — unlike /api/snapshot, this
+	// isn't limited to the in-memory event buffer, so it can find mail from
+	// before mail-monitor started or from earlier days.
+	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("q")
+		res := searchHistory(db, q)
+		w.Header().Set("Content-Type", "application/json")
+		if res.err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": res.err.Error()})
+			return
+		}
+		events := make([]webEvent, 0, len(res.events))
+		for _, e := range res.events {
+			events = append(events, toWebEvent(e))
+		}
+		json.NewEncoder(w).Encode(map[string]any{"events": events})
 	})
 
 	mux.HandleFunc("/api/stream", func(w http.ResponseWriter, r *http.Request) {
