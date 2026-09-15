@@ -27,5 +27,5 @@ sudo dpkg -i "$TMP_DEB" || sudo apt-get install -f -y
 rm -f "$TMP_DEB"
 
 echo "==> done. installed as a systemd service (mail-monitor.service), running now."
-echo "    web dashboard: http://localhost:8080"
+echo "    web dashboard: http://localhost:10080"
 echo "    TUI: run 'mail-monitor' directly in a terminal"
