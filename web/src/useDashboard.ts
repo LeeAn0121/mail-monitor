@@ -9,6 +9,7 @@ const RESYNC_MS = 5000;
 
 interface FeedState {
   connected: boolean;
+  loaded: boolean;
   events: WebEvent[];
   counts: Record<string, number>;
   senderRanking: RankEntry[];
@@ -23,6 +24,7 @@ export interface DashboardState extends FeedState {
 export function useDashboard(): DashboardState {
   const [state, setState] = useState<FeedState>({
     connected: false,
+    loaded: false,
     events: [],
     counts: {},
     senderRanking: [],
@@ -34,6 +36,7 @@ export function useDashboard(): DashboardState {
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     async function resync(opts?: { reload?: boolean }) {
       try {
@@ -43,6 +46,7 @@ export function useDashboard(): DashboardState {
         const reload = opts?.reload ?? false;
         setState((prev) => ({
           ...prev,
+          loaded: true,
           // Only seed the feed/counts from the very first snapshot — after
           // that the SSE stream is the source of truth for new arrivals, and
           // re-adopting the snapshot's feed on every resync would clobber
@@ -56,7 +60,13 @@ export function useDashboard(): DashboardState {
         }));
         loadedSnapshot.current = true;
       } catch {
-        // server not reachable yet — resync interval will retry
+        // Page loaded before the server was reachable (e.g. right after a
+        // deploy restart), or a transient network blip — retry quickly
+        // instead of leaving the dashboard looking empty until the next
+        // slow periodic resync (or a manual refresh click) happens to work.
+        if (!cancelled && !loadedSnapshot.current) {
+          retryTimer = setTimeout(() => resync(opts), 1000);
+        }
       }
     }
 
@@ -79,6 +89,7 @@ export function useDashboard(): DashboardState {
     return () => {
       cancelled = true;
       clearInterval(resyncTimer);
+      clearTimeout(retryTimer);
       es.close();
     };
   }, []);

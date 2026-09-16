@@ -16,7 +16,7 @@ import { useVersion } from "./useVersion";
 
 export default function App() {
   const [view, setView] = useState<View>("live");
-  const { connected, events, counts, senderRanking, receiverRanking, alertActive, refresh } = useDashboard();
+  const { connected, loaded, events, counts, senderRanking, receiverRanking, alertActive, refresh } = useDashboard();
   const history = useHistorySearch();
   const versionInfo = useVersion();
 
@@ -80,7 +80,7 @@ export default function App() {
                   events={events}
                   mode="live"
                   onRefresh={refresh}
-                  emptyHint="이벤트를 기다리는 중..."
+                  emptyHint={loaded ? "이벤트를 기다리는 중..." : "불러오는 중..."}
                   filename="mail-monitor_live"
                 />
               </Box>
