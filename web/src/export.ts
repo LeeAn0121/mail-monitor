@@ -1,10 +1,20 @@
 import * as XLSX from "xlsx";
 import type { WebEvent } from "./types";
 
-const COLUMNS = ["시간", "유형", "발신", "수신", "내용", "처리결과", "발신자IP", "수신자IP"] as const;
+const COLUMNS = [
+  "시간",
+  "유형",
+  "발신",
+  "수신",
+  "원본수신(별칭)",
+  "내용",
+  "처리결과",
+  "발신자IP",
+  "수신자IP",
+] as const;
 
 function toRows(events: WebEvent[]): string[][] {
-  return events.map((e) => [e.when, e.type, e.from, e.to, e.subject, e.result, e.fromIp, e.toIp]);
+  return events.map((e) => [e.when, e.type, e.from, e.to, e.origTo, e.subject, e.result, e.fromIp, e.toIp]);
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -33,6 +43,7 @@ export function exportXLSX(events: WebEvent[], filename = "mail-monitor.xlsx") {
   sheet["!cols"] = [
     { wch: 18 },
     { wch: 8 },
+    { wch: 26 },
     { wch: 26 },
     { wch: 26 },
     { wch: 40 },

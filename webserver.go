@@ -40,6 +40,7 @@ type webEvent struct {
 	Glyph   string `json:"glyph"`
 	From    string `json:"from"`
 	To      string `json:"to"`
+	OrigTo  string `json:"origTo"`
 	Subject string `json:"subject"`
 	Result  string `json:"result"`
 	FromIP  string `json:"fromIp"`
@@ -53,6 +54,7 @@ func toWebEvent(ev Event) webEvent {
 		Glyph:   ev.Type.Glyph(),
 		From:    ev.From,
 		To:      ev.To,
+		OrigTo:  ev.OrigTo,
 		Subject: ev.Subject,
 		Result:  ev.Result,
 		FromIP:  ev.FromIP,

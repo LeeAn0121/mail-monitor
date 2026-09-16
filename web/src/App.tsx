@@ -71,27 +71,30 @@ export default function App() {
         </Stack>
 
         <Box sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2, minHeight: 0, flex: 1 }}>
-          {view === "live" ? (
+          {view === "live" && (
             <>
               <StatusStrip counts={counts} />
-              <Stack direction={{ xs: "column", lg: "row" }} spacing={2} sx={{ flex: 1, minHeight: 0 }}>
-                <Box sx={{ flex: 3, minWidth: 0, display: "flex" }}>
-                  <LogTable
-                    title="실시간 로그"
-                    events={events}
-                    mode="live"
-                    onRefresh={refresh}
-                    emptyHint="이벤트를 기다리는 중..."
-                    filename="mail-monitor_live"
-                  />
-                </Box>
-                <Stack sx={{ flex: 1, minWidth: 260, minHeight: 0 }} spacing={2}>
-                  <RankingList title="발신 랭킹" entries={senderRanking} color={eventColors.SENT} />
-                  <RankingList title="수신 랭킹" entries={receiverRanking} color={eventColors.RECV} />
-                </Stack>
-              </Stack>
+              <Box sx={{ flex: 1, minHeight: 0, display: "flex" }}>
+                <LogTable
+                  title="실시간 로그"
+                  events={events}
+                  mode="live"
+                  onRefresh={refresh}
+                  emptyHint="이벤트를 기다리는 중..."
+                  filename="mail-monitor_live"
+                />
+              </Box>
             </>
-          ) : (
+          )}
+
+          {view === "ranking" && (
+            <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ flex: 1, minHeight: 0 }}>
+              <RankingList title="발신 랭킹" entries={senderRanking} color={eventColors.SENT} />
+              <RankingList title="수신 랭킹" entries={receiverRanking} color={eventColors.RECV} />
+            </Stack>
+          )}
+
+          {view === "history" && (
             <Box sx={{ display: "flex", flex: 1, minHeight: 0 }}>
               <LogTable
                 title="이력 검색"

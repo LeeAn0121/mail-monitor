@@ -115,6 +115,15 @@ export default function LogTable({
       { field: "from", headerName: "발신", flex: 1.1, minWidth: 160, cellClassName: "mm-mono", sx: wrapCell },
       { field: "to", headerName: "수신", flex: 1.1, minWidth: 160, cellClassName: "mm-mono", sx: wrapCell },
       {
+        field: "origTo",
+        headerName: "원본 수신(별칭)",
+        flex: 1,
+        minWidth: 160,
+        cellClassName: "mm-mono mm-dim",
+        sx: wrapCell,
+        renderCell: (p) => (p.value ? <span>{p.value}</span> : <span style={{ opacity: 0.4 }}>—</span>),
+      },
+      {
         field: "subject",
         headerName: "내용(제목)",
         flex: 1.6,

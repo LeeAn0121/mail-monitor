@@ -97,13 +97,16 @@ type Event struct {
 	From string // raw sender address, undecorated (no name/IP) — for aggregation like the sender ranking view
 	To   string // raw recipient address, undecorated — for aggregation like the receiver ranking view
 
-	// Subject/Result/FromIP/ToIP are the web dashboard's structured columns
-	// (시간/유형/발신/수신/내용/처리결과/발신자IP/수신자IP) — Text stays the
-	// TUI's single rendered line, which mixes several of these together.
+	// Subject/Result/FromIP/ToIP/OrigTo are the web dashboard's structured
+	// columns (시간/유형/발신/수신/원본수신/내용/처리결과/발신자IP/수신자IP)
+	// — Text stays the TUI's single rendered line, which mixes several of
+	// these together. OrigTo is only set for FWD events: the alias/address
+	// the mail was originally addressed to before forwarding put it in To.
 	Subject string
 	Result  string
 	FromIP  string
 	ToIP    string
+	OrigTo  string
 
 	// rawLower/textLower cache strings.ToLower(Raw)/(Text), computed once at
 	// construction, so matchesFilter doesn't re-lowercase every event on
@@ -115,8 +118,8 @@ type Event struct {
 // withDetail fills in the web dashboard's structured columns that the TUI's
 // Text field doesn't carry. Chainable off newEvent so call sites stay
 // one-liners: newEvent(...).withDetail(...).
-func (e *Event) withDetail(subject, result, fromIP, toIP string) *Event {
-	e.Subject, e.Result, e.FromIP, e.ToIP = subject, result, fromIP, toIP
+func (e *Event) withDetail(subject, result, fromIP, toIP, origTo string) *Event {
+	e.Subject, e.Result, e.FromIP, e.ToIP, e.OrigTo = subject, result, fromIP, toIP, origTo
 	return e
 }
 
@@ -318,24 +321,26 @@ func (m *model) processLine(line string) *Event {
 			}
 			return newEvent(when, EventBounce, line, from, toRaw,
 				withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)).
-				withDetail(subject, reason, m.qidIP[qid], "")
+				withDetail(subject, reason, m.qidIP[qid], "", "")
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			if isLocalRelay(relay) {
 				typ := EventRecv
 				result := "수신 완료"
+				evOrigTo := ""
 				if forwarded {
 					typ = EventForward
-					result = fmt.Sprintf("%s 수신 주소로 발송됨 → %s(으)로 전달", origTo, finalTo)
+					result = "전달 완료"
+					evOrigTo = origTo
 				}
 				return newEvent(when, typ, line, from, toRaw,
 					withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)).
-					withDetail(subject, result, m.qidIP[qid], "")
+					withDetail(subject, result, m.qidIP[qid], "", evOrigTo)
 			}
 			relayIP := extract(bracketIP, relay)
 			return newEvent(when, EventSent, line, from, toRaw,
 				withSubject(fmt.Sprintf("발신: %s → 수신: %s (via %s)", fromDisplay, to, relay), subject)).
-				withDetail(subject, "발송 완료", m.qidIP[qid], relayIP)
+				withDetail(subject, "발송 완료", m.qidIP[qid], relayIP, "")
 		}
 		return nil
 	}
@@ -345,7 +350,7 @@ func (m *model) processLine(line string) *Event {
 		user := m.addr(extract(userRe, line))
 		rip := extract(ripRe, line)
 		return newEvent(when, EventLogin, line, "", "", fmt.Sprintf("%s from %s", user, rip)).
-			withDetail("", "로그인 성공", rip, "")
+			withDetail("", "로그인 성공", rip, "", "")
 	case strings.Contains(line, "reject:"):
 		fromRaw := extract(fromRe, line)
 		from := m.addr(shortenSRS(fromRaw))
@@ -358,7 +363,7 @@ func (m *model) processLine(line string) *Event {
 		}
 		return newEvent(when, EventReject, line, fromRaw, toRaw,
 			fmt.Sprintf("발신: %s → 수신: %s (%s)", fromWithIP(from, ip), to, reason)).
-			withDetail("", reason, ip, "")
+			withDetail("", reason, ip, "", "")
 	}
 	return nil
 }

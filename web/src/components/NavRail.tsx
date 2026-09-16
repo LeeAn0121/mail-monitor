@@ -3,11 +3,13 @@ import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import ActivityIcon from "@mui/icons-material/GraphicEq";
 import HistoryIcon from "@mui/icons-material/ManageSearch";
+import RankingIcon from "@mui/icons-material/Leaderboard";
 
-export type View = "live" | "history";
+export type View = "live" | "ranking" | "history";
 
 const ITEMS: { id: View; label: string; icon: React.ReactNode }[] = [
   { id: "live", label: "실시간", icon: <ActivityIcon fontSize="small" /> },
+  { id: "ranking", label: "발신/수신 랭킹", icon: <RankingIcon fontSize="small" /> },
   { id: "history", label: "이력 검색", icon: <HistoryIcon fontSize="small" /> },
 ];
 
