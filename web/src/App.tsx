@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
+import Link from "@mui/material/Link";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import LogTable from "./components/LogTable";
@@ -8,14 +9,16 @@ import NavRail from "./components/NavRail";
 import type { View } from "./components/NavRail";
 import RankingList from "./components/RankingList";
 import StatusStrip from "./components/StatusStrip";
-import { eventColors } from "./theme";
+import { eventColors, monoFont } from "./theme";
 import { useDashboard } from "./useDashboard";
 import { useHistorySearch } from "./useHistorySearch";
+import { useVersion } from "./useVersion";
 
 export default function App() {
   const [view, setView] = useState<View>("live");
   const { connected, events, counts, senderRanking, receiverRanking, alertActive, refresh } = useDashboard();
   const history = useHistorySearch();
+  const versionInfo = useVersion();
 
   return (
     <Box sx={{ display: "flex", height: "100vh", bgcolor: "background.default" }}>
@@ -28,9 +31,23 @@ export default function App() {
           justifyContent="space-between"
           sx={{ px: 2.5, py: 1.5, borderBottom: 1, borderColor: "divider" }}
         >
-          <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: "-0.01em" }}>
-            mail-monitor
-          </Typography>
+          <Stack direction="row" spacing={1} alignItems="baseline">
+            <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: "-0.01em" }}>
+              mail-monitor
+            </Typography>
+            {versionInfo && (
+              <Link
+                href={versionInfo.releaseUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                underline="hover"
+                variant="caption"
+                sx={{ fontFamily: monoFont, color: "text.disabled" }}
+              >
+                v{versionInfo.version}
+              </Link>
+            )}
+          </Stack>
           <Stack direction="row" spacing={1} alignItems="center">
             {alertActive && (
               <Chip

@@ -23,6 +23,12 @@ export interface Snapshot {
   alertActive: boolean;
 }
 
+export interface VersionInfo {
+  version: string;
+  releaseUrl: string;
+  releasesUrl: string;
+}
+
 export interface HistoryResponse {
   events: WebEvent[];
   error?: string;

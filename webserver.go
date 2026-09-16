@@ -219,12 +219,31 @@ func webAddr() string {
 	return v
 }
 
+// releaseURL links a version to its specific GitHub release tag. version is
+// "dev" for a local (non-goreleaser) build, which has no tag to link to —
+// the dashboard falls back to the releases index for that case.
+func releaseURL(version string) string {
+	if version == "" || version == "dev" {
+		return "https://github.com/LeeAn0121/mail-monitor/releases"
+	}
+	return "https://github.com/LeeAn0121/mail-monitor/releases/tag/v" + version
+}
+
 // startWebServer runs the dashboard's HTTP server in the background for the
 // lifetime of the process. Errors (e.g. port already in use) are reported to
 // stderr rather than crashing mail-monitor — the TUI keeps working either way.
 func startWebServer(addr string, state *webState, hub *sseHub, db *sql.DB) {
 	mux := http.NewServeMux()
 	mux.Handle("/", webDistHandler())
+
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"version":     version,
+			"releaseUrl":  releaseURL(version),
+			"releasesUrl": "https://github.com/LeeAn0121/mail-monitor/releases",
+		})
+	})
 
 	mux.HandleFunc("/api/snapshot", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
