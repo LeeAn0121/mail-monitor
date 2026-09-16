@@ -94,10 +94,10 @@ export default function EventDetailDialog({ event, onClose }: { event: WebEvent 
             <Stack spacing={2}>
               <Stack direction="row" spacing={3}>
                 <Box sx={{ flex: 1 }}>
-                  <Field label="발신" value={event.from} mono />
+                  <Field label="발신" value={event.fromDisplay} mono />
                 </Box>
                 <Box sx={{ flex: 1 }}>
-                  <Field label="수신" value={event.to} mono />
+                  <Field label="수신" value={event.toDisplay} mono />
                 </Box>
               </Stack>
               {event.origTo && (
@@ -105,8 +105,14 @@ export default function EventDetailDialog({ event, onClose }: { event: WebEvent 
               )}
               <Field label="내용(제목)" value={event.subject} />
               <Field
-                label="처리결과"
+                label="처리결과 요약"
                 value={event.result}
+                color={["BOUNCE", "REJECT"].includes(event.type) ? eventColors[event.type] : undefined}
+              />
+              <Field
+                label="처리결과 원본"
+                value={event.resultDetail}
+                mono
                 color={["BOUNCE", "REJECT"].includes(event.type) ? eventColors[event.type] : undefined}
               />
               <Stack direction="row" spacing={3}>

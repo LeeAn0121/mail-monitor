@@ -4,9 +4,12 @@ export interface WebEvent {
   glyph: string;
   from: string;
   to: string;
+  fromDisplay: string;
+  toDisplay: string;
   origTo: string;
   subject: string;
   result: string;
+  resultDetail: string;
   fromIp: string;
   toIp: string;
   raw: string;

@@ -35,32 +35,38 @@ var webDistFS embed.FS
 // view of Event so the frontend never needs to know about EventType's int
 // encoding.
 type webEvent struct {
-	When    string `json:"when"`
-	Type    string `json:"type"`
-	Glyph   string `json:"glyph"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	OrigTo  string `json:"origTo"`
-	Subject string `json:"subject"`
-	Result  string `json:"result"`
-	FromIP  string `json:"fromIp"`
-	ToIP    string `json:"toIp"`
-	Raw     string `json:"raw"`
+	When          string `json:"when"`
+	Type          string `json:"type"`
+	Glyph         string `json:"glyph"`
+	From          string `json:"from"`
+	To            string `json:"to"`
+	FromDisplay   string `json:"fromDisplay"`
+	ToDisplay     string `json:"toDisplay"`
+	OrigTo        string `json:"origTo"`
+	Subject       string `json:"subject"`
+	ResultSummary string `json:"result"`
+	ResultDetail  string `json:"resultDetail"`
+	FromIP        string `json:"fromIp"`
+	ToIP          string `json:"toIp"`
+	Raw           string `json:"raw"`
 }
 
 func toWebEvent(ev Event) webEvent {
 	return webEvent{
-		When:    ev.When,
-		Type:    ev.Type.Label(),
-		Glyph:   ev.Type.Glyph(),
-		From:    ev.From,
-		To:      ev.To,
-		OrigTo:  ev.OrigTo,
-		Subject: ev.Subject,
-		Result:  ev.Result,
-		FromIP:  ev.FromIP,
-		ToIP:    ev.ToIP,
-		Raw:     ev.Raw,
+		When:          ev.When,
+		Type:          ev.Type.Label(),
+		Glyph:         ev.Type.Glyph(),
+		From:          ev.From,
+		To:            ev.To,
+		FromDisplay:   ev.FromDisplay,
+		ToDisplay:     ev.ToDisplay,
+		OrigTo:        ev.OrigTo,
+		Subject:       ev.Subject,
+		ResultSummary: ev.ResultSummary,
+		ResultDetail:  ev.ResultDetail,
+		FromIP:        ev.FromIP,
+		ToIP:          ev.ToIP,
+		Raw:           ev.Raw,
 	}
 }
 

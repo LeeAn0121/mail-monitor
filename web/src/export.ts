@@ -9,12 +9,24 @@ const COLUMNS = [
   "원본수신(별칭)",
   "내용",
   "처리결과",
+  "처리결과(원본)",
   "발신자IP",
   "수신자IP",
 ] as const;
 
 function toRows(events: WebEvent[]): string[][] {
-  return events.map((e) => [e.when, e.type, e.from, e.to, e.origTo, e.subject, e.result, e.fromIp, e.toIp]);
+  return events.map((e) => [
+    e.when,
+    e.type,
+    e.fromDisplay,
+    e.toDisplay,
+    e.origTo,
+    e.subject,
+    e.result,
+    e.resultDetail,
+    e.fromIp,
+    e.toIp,
+  ]);
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -43,11 +55,12 @@ export function exportXLSX(events: WebEvent[], filename = "mail-monitor.xlsx") {
   sheet["!cols"] = [
     { wch: 18 },
     { wch: 8 },
-    { wch: 26 },
-    { wch: 26 },
+    { wch: 28 },
+    { wch: 28 },
     { wch: 26 },
     { wch: 40 },
     { wch: 16 },
+    { wch: 40 },
     { wch: 16 },
     { wch: 16 },
   ];

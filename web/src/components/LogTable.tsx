@@ -86,9 +86,10 @@ export default function LogTable({
       if (!q) return true;
       return (
         e.subject.toLowerCase().includes(q) ||
-        e.from.toLowerCase().includes(q) ||
-        e.to.toLowerCase().includes(q) ||
-        e.result.toLowerCase().includes(q)
+        e.fromDisplay.toLowerCase().includes(q) ||
+        e.toDisplay.toLowerCase().includes(q) ||
+        e.result.toLowerCase().includes(q) ||
+        e.resultDetail.toLowerCase().includes(q)
       );
     });
   }, [events, query, activeTypes, mode]);
@@ -114,8 +115,8 @@ export default function LogTable({
           </span>
         ),
       },
-      { field: "from", headerName: "발신", flex: 1.1, minWidth: 160, cellClassName: "mm-mono", sx: wrapCell },
-      { field: "to", headerName: "수신", flex: 1.1, minWidth: 160, cellClassName: "mm-mono", sx: wrapCell },
+      { field: "fromDisplay", headerName: "발신", flex: 1.1, minWidth: 180, cellClassName: "mm-mono", sx: wrapCell },
+      { field: "toDisplay", headerName: "수신", flex: 1.1, minWidth: 180, cellClassName: "mm-mono", sx: wrapCell },
       {
         field: "origTo",
         headerName: "원본 수신(별칭)",

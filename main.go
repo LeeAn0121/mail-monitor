@@ -97,16 +97,27 @@ type Event struct {
 	From string // raw sender address, undecorated (no name/IP) — for aggregation like the sender ranking view
 	To   string // raw recipient address, undecorated — for aggregation like the receiver ranking view
 
-	// Subject/Result/FromIP/ToIP/OrigTo are the web dashboard's structured
-	// columns (시간/유형/발신/수신/원본수신/내용/처리결과/발신자IP/수신자IP)
-	// — Text stays the TUI's single rendered line, which mixes several of
-	// these together. OrigTo is only set for FWD events: the alias/address
-	// the mail was originally addressed to before forwarding put it in To.
-	Subject string
-	Result  string
-	FromIP  string
-	ToIP    string
-	OrigTo  string
+	// Subject/ResultSummary/ResultDetail/FromIP/ToIP/OrigTo are the web
+	// dashboard's structured columns (시간/유형/발신/수신/원본수신/내용/
+	// 처리결과/발신자IP/수신자IP) — Text stays the TUI's single rendered
+	// line, which mixes several of these together. OrigTo is only set for
+	// FWD events: the alias/address the mail was originally addressed to
+	// before forwarding put it in To. ResultSummary is the short status
+	// shown in the table (e.g. "발송 완료"); ResultDetail is postfix's own
+	// full status text, shown only in the row detail popup.
+	Subject       string
+	ResultSummary string
+	ResultDetail  string
+	FromIP        string
+	ToIP          string
+	OrigTo        string
+
+	// FromDisplay/ToDisplay are From/To with a resolved display name
+	// appended ("addr@example.com (홍길동)") when the users table (see
+	// resolveName) has one — set by withNames, which every construction
+	// site chains after withDetail.
+	FromDisplay string
+	ToDisplay   string
 
 	// rawLower/textLower cache strings.ToLower(Raw)/(Text), computed once at
 	// construction, so matchesFilter doesn't re-lowercase every event on
@@ -118,9 +129,20 @@ type Event struct {
 // withDetail fills in the web dashboard's structured columns that the TUI's
 // Text field doesn't carry. Chainable off newEvent so call sites stay
 // one-liners: newEvent(...).withDetail(...).
-func (e *Event) withDetail(subject, result, fromIP, toIP, origTo string) *Event {
-	e.Subject, e.Result, e.FromIP, e.ToIP, e.OrigTo = subject, result, fromIP, toIP, origTo
+func (e *Event) withDetail(subject, resultSummary, resultDetail, fromIP, toIP, origTo string) *Event {
+	e.Subject, e.ResultSummary, e.ResultDetail = subject, resultSummary, resultDetail
+	e.FromIP, e.ToIP, e.OrigTo = fromIP, toIP, origTo
 	return e
+}
+
+// withNames resolves display names for From/To via the users table (MySQL,
+// optional — see resolveName) into FromDisplay/ToDisplay, for the web
+// dashboard's 발신/수신 columns. Takes m explicitly (rather than being a
+// method on model) so it can wrap a return statement: withNames(m, newEvent(...)).
+func withNames(m *model, ev *Event) *Event {
+	ev.FromDisplay = m.nameSuffix(ev.From)
+	ev.ToDisplay = m.nameSuffix(ev.To)
+	return ev
 }
 
 // newEvent builds an Event and precomputes its lowercase filter-match cache.
@@ -317,41 +339,39 @@ func (m *model) processLine(line string) *Event {
 		switch {
 		case strings.Contains(rest, "status=bounced"):
 			reason := extract(bounceReasonRe, rest)
-			if reason == "-" {
-				reason = "반송"
+			detail := reason
+			if detail == "-" {
+				detail = "반송"
 			}
-			return newEvent(when, EventBounce, line, from, toRaw,
+			return withNames(m, newEvent(when, EventBounce, line, from, toRaw,
 				withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)).
-				withDetail(subject, reason, m.qidIP[qid], "", "")
+				withDetail(subject, "반송", detail, m.qidIP[qid], "", ""))
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			detail := extract(sentDetailRe, rest)
 			if isLocalRelay(relay) {
 				typ := EventRecv
-				result := "수신 완료"
-				if detail != "-" {
-					result = detail
-				}
+				summary := "수신 완료"
 				evOrigTo := ""
 				if forwarded {
 					typ = EventForward
-					if detail == "-" {
-						result = "전달 완료"
-					}
+					summary = "전달 완료"
 					evOrigTo = origTo
 				}
-				return newEvent(when, typ, line, from, toRaw,
+				if detail == "-" {
+					detail = summary
+				}
+				return withNames(m, newEvent(when, typ, line, from, toRaw,
 					withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)).
-					withDetail(subject, result, m.qidIP[qid], "", evOrigTo)
+					withDetail(subject, summary, detail, m.qidIP[qid], "", evOrigTo))
 			}
-			result := "발송 완료"
-			if detail != "-" {
-				result = detail
+			if detail == "-" {
+				detail = "발송 완료"
 			}
 			relayIP := extract(bracketIP, relay)
-			return newEvent(when, EventSent, line, from, toRaw,
+			return withNames(m, newEvent(when, EventSent, line, from, toRaw,
 				withSubject(fmt.Sprintf("발신: %s → 수신: %s (via %s)", fromDisplay, to, relay), subject)).
-				withDetail(subject, result, m.qidIP[qid], relayIP, "")
+				withDetail(subject, "발송 완료", detail, m.qidIP[qid], relayIP, ""))
 		}
 		return nil
 	}
@@ -360,21 +380,25 @@ func (m *model) processLine(line string) *Event {
 	case loginRe.MatchString(line):
 		user := m.addr(extract(userRe, line))
 		rip := extract(ripRe, line)
-		return newEvent(when, EventLogin, line, "", "", fmt.Sprintf("%s from %s", user, rip)).
-			withDetail("", "로그인 성공", rip, "", "")
+		return withNames(m, newEvent(when, EventLogin, line, "", "", fmt.Sprintf("%s from %s", user, rip)).
+			withDetail("", "로그인 성공", "로그인 성공", rip, "", ""))
 	case strings.Contains(line, "reject:"):
 		fromRaw := extract(fromRe, line)
 		from := m.addr(shortenSRS(fromRaw))
 		toRaw := extract(toRe, line)
 		to := m.addr(toRaw)
 		reason := extract(rejectRe, line)
+		detail := reason
+		if detail == "-" {
+			detail = "거부"
+		}
 		ip := ""
 		if im := bracketIP.FindStringSubmatch(line); im != nil {
 			ip = im[1]
 		}
-		return newEvent(when, EventReject, line, fromRaw, toRaw,
+		return withNames(m, newEvent(when, EventReject, line, fromRaw, toRaw,
 			fmt.Sprintf("발신: %s → 수신: %s (%s)", fromWithIP(from, ip), to, reason)).
-			withDetail("", reason, ip, "", "")
+			withDetail("", "거부", detail, ip, "", ""))
 	}
 	return nil
 }
@@ -730,6 +754,16 @@ func (m *model) resolveName(email string) string {
 func (m *model) addr(email string) string {
 	if name := m.resolveName(email); name != "" {
 		return fmt.Sprintf("%s <%s>", name, email)
+	}
+	return email
+}
+
+// nameSuffix renders an address as "email (Name)" when a name is known —
+// the web dashboard's 발신/수신 column format, email-first so it still sorts
+// and filters the same as the raw address.
+func (m *model) nameSuffix(email string) string {
+	if name := m.resolveName(email); name != "" {
+		return fmt.Sprintf("%s (%s)", email, name)
 	}
 	return email
 }
