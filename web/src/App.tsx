@@ -14,7 +14,7 @@ import { useHistorySearch } from "./useHistorySearch";
 
 export default function App() {
   const [view, setView] = useState<View>("live");
-  const { connected, events, counts, senderRanking, receiverRanking, alertActive } = useDashboard();
+  const { connected, events, counts, senderRanking, receiverRanking, alertActive, refresh } = useDashboard();
   const history = useHistorySearch();
 
   return (
@@ -63,6 +63,7 @@ export default function App() {
                     title="실시간 로그"
                     events={events}
                     mode="live"
+                    onRefresh={refresh}
                     emptyHint="이벤트를 기다리는 중..."
                     filename="mail-monitor_live"
                   />
@@ -80,6 +81,8 @@ export default function App() {
                 events={history.results}
                 mode="history"
                 onSearch={history.search}
+                onRefresh={() => history.search(history.searchedFor ?? history.initialQuery)}
+                initialQuery={history.initialQuery}
                 loading={history.loading}
                 emptyHint={
                   history.error

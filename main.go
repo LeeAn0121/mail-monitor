@@ -97,11 +97,27 @@ type Event struct {
 	From string // raw sender address, undecorated (no name/IP) — for aggregation like the sender ranking view
 	To   string // raw recipient address, undecorated — for aggregation like the receiver ranking view
 
+	// Subject/Result/FromIP/ToIP are the web dashboard's structured columns
+	// (시간/유형/발신/수신/내용/처리결과/발신자IP/수신자IP) — Text stays the
+	// TUI's single rendered line, which mixes several of these together.
+	Subject string
+	Result  string
+	FromIP  string
+	ToIP    string
+
 	// rawLower/textLower cache strings.ToLower(Raw)/(Text), computed once at
 	// construction, so matchesFilter doesn't re-lowercase every event on
 	// every keystroke/render pass.
 	rawLower  string
 	textLower string
+}
+
+// withDetail fills in the web dashboard's structured columns that the TUI's
+// Text field doesn't carry. Chainable off newEvent so call sites stay
+// one-liners: newEvent(...).withDetail(...).
+func (e *Event) withDetail(subject, result, fromIP, toIP string) *Event {
+	e.Subject, e.Result, e.FromIP, e.ToIP = subject, result, fromIP, toIP
+	return e
 }
 
 // newEvent builds an Event and precomputes its lowercase filter-match cache.
@@ -134,17 +150,18 @@ var (
 	// e.g. "... postfix/qmgr[2568950]: 933E0AC0470: from=<...>, size=..." -> ("933E0AC0470", "from=<...>, size=...")
 	qidLineRe = regexp.MustCompile(`^\S+ +\d+ +\S+ +\S+ +\S+: ([0-9A-F]{9,14}): (.*)$`)
 
-	loginRe   = regexp.MustCompile(`dovecot.*(?:auth.*Success|imap-login.*Login)`)
-	userRe    = regexp.MustCompile(`user=<([^>]*)>`)
-	ripRe     = regexp.MustCompile(`rip=([0-9.]+)`)
-	fromRe    = regexp.MustCompile(`from=<([^>]*)>`)
-	toRe      = regexp.MustCompile(`to=<([^>]*)>`)
-	origToRe  = regexp.MustCompile(`orig_to=<([^>]*)>`)
-	relayRe   = regexp.MustCompile(`relay=([^,\s]*)`)
-	rejectRe  = regexp.MustCompile(`reject:\s*([^;]*)`)
-	clientRe  = regexp.MustCompile(`client=\S+\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
-	bracketIP = regexp.MustCompile(`\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
-	subjectRe = regexp.MustCompile(`warning: header Subject: (.*?) from \S+\[[0-9.]+\];`)
+	loginRe        = regexp.MustCompile(`dovecot.*(?:auth.*Success|imap-login.*Login)`)
+	userRe         = regexp.MustCompile(`user=<([^>]*)>`)
+	ripRe          = regexp.MustCompile(`rip=([0-9.]+)`)
+	fromRe         = regexp.MustCompile(`from=<([^>]*)>`)
+	toRe           = regexp.MustCompile(`to=<([^>]*)>`)
+	origToRe       = regexp.MustCompile(`orig_to=<([^>]*)>`)
+	relayRe        = regexp.MustCompile(`relay=([^,\s]*)`)
+	rejectRe       = regexp.MustCompile(`reject:\s*([^;]*)`)
+	bounceReasonRe = regexp.MustCompile(`status=bounced \((.*)\)`)
+	clientRe       = regexp.MustCompile(`client=\S+\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
+	bracketIP      = regexp.MustCompile(`\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
+	subjectRe      = regexp.MustCompile(`warning: header Subject: (.*?) from \S+\[[0-9.]+\];`)
 )
 
 func extract(re *regexp.Regexp, line string) string {
@@ -293,20 +310,30 @@ func (m *model) processLine(line string) *Event {
 
 		switch {
 		case strings.Contains(rest, "status=bounced"):
+			reason := extract(bounceReasonRe, rest)
+			if reason == "-" {
+				reason = "반송"
+			}
 			return newEvent(when, EventBounce, line, from, toRaw,
-				withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject))
+				withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)).
+				withDetail(subject, reason, m.qidIP[qid], "")
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
 			if isLocalRelay(relay) {
 				typ := EventRecv
+				result := "수신 완료"
 				if forwarded {
 					typ = EventForward
+					result = "전달 완료"
 				}
 				return newEvent(when, typ, line, from, toRaw,
-					withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject))
+					withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)).
+					withDetail(subject, result, m.qidIP[qid], "")
 			}
+			relayIP := extract(bracketIP, relay)
 			return newEvent(when, EventSent, line, from, toRaw,
-				withSubject(fmt.Sprintf("발신: %s → 수신: %s (via %s)", fromDisplay, to, relay), subject))
+				withSubject(fmt.Sprintf("발신: %s → 수신: %s (via %s)", fromDisplay, to, relay), subject)).
+				withDetail(subject, "발송 완료", m.qidIP[qid], relayIP)
 		}
 		return nil
 	}
@@ -315,7 +342,8 @@ func (m *model) processLine(line string) *Event {
 	case loginRe.MatchString(line):
 		user := m.addr(extract(userRe, line))
 		rip := extract(ripRe, line)
-		return newEvent(when, EventLogin, line, "", "", fmt.Sprintf("%s from %s", user, rip))
+		return newEvent(when, EventLogin, line, "", "", fmt.Sprintf("%s from %s", user, rip)).
+			withDetail("", "로그인 성공", rip, "")
 	case strings.Contains(line, "reject:"):
 		fromRaw := extract(fromRe, line)
 		from := m.addr(shortenSRS(fromRaw))
@@ -327,7 +355,8 @@ func (m *model) processLine(line string) *Event {
 			ip = im[1]
 		}
 		return newEvent(when, EventReject, line, fromRaw, toRaw,
-			fmt.Sprintf("발신: %s → 수신: %s (%s)", fromWithIP(from, ip), to, reason))
+			fmt.Sprintf("발신: %s → 수신: %s (%s)", fromWithIP(from, ip), to, reason)).
+			withDetail("", reason, ip, "")
 	}
 	return nil
 }

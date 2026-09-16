@@ -1,22 +1,38 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
+import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import SearchIcon from "@mui/icons-material/Search";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import PrintIcon from "@mui/icons-material/Print";
+import RefreshIcon from "@mui/icons-material/Refresh";
 import { EVENT_TYPES } from "../types";
 import type { WebEvent } from "../types";
 import { eventColors, monoFont } from "../theme";
 import { exportCSV, exportXLSX } from "../export";
+import { loadWithTTL, saveWithTTL } from "../persist";
 
-const GRID_COLS = "104px 84px 1fr 1fr 2.4fr";
+// 시간/유형/발신자IP/수신자IP are fixed-width so addresses and results — the
+// two columns worth the most horizontal room — get it. The whole grid has a
+// min-width and scrolls horizontally rather than squeezing columns past
+// legibility on narrow screens.
+const GRID_COLS = "96px 66px 1.3fr 1.3fr 1.8fr 1fr 108px 108px";
+const GRID_MIN_WIDTH = 980;
+
+const LIVE_FILTER_KEY = "mm.liveFilter";
+
+interface LiveFilter {
+  query: string;
+  types: string[];
+}
 
 interface Props {
   title: string;
@@ -24,15 +40,41 @@ interface Props {
   /** Live mode filters client-side; history mode delegates to onSearch. */
   mode: "live" | "history";
   onSearch?: (query: string) => void;
+  onRefresh?: () => void;
+  initialQuery?: string;
   loading?: boolean;
   emptyHint: string;
   filename: string;
 }
 
-export default function LogTable({ title, events, mode, onSearch, loading, emptyHint, filename }: Props) {
-  const [query, setQuery] = useState("");
-  const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set(EVENT_TYPES));
+const FAILURE_TYPES = new Set(["BOUNCE", "REJECT"]);
+
+export default function LogTable({
+  title,
+  events,
+  mode,
+  onSearch,
+  onRefresh,
+  initialQuery,
+  loading,
+  emptyHint,
+  filename,
+}: Props) {
+  const [query, setQuery] = useState(() => {
+    if (mode === "history") return initialQuery ?? "";
+    return loadWithTTL<LiveFilter>(LIVE_FILTER_KEY)?.query ?? "";
+  });
+  const [activeTypes, setActiveTypes] = useState<Set<string>>(() => {
+    if (mode !== "live") return new Set(EVENT_TYPES);
+    const saved = loadWithTTL<LiveFilter>(LIVE_FILTER_KEY)?.types;
+    return saved && saved.length > 0 ? new Set(saved) : new Set(EVENT_TYPES);
+  });
   const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (mode !== "live") return;
+    saveWithTTL<LiveFilter>(LIVE_FILTER_KEY, { query, types: Array.from(activeTypes) });
+  }, [mode, query, activeTypes]);
 
   const filtered = useMemo(() => {
     if (mode === "history") return events;
@@ -41,9 +83,10 @@ export default function LogTable({ title, events, mode, onSearch, loading, empty
       if (!activeTypes.has(e.type)) return false;
       if (!q) return true;
       return (
-        e.text.toLowerCase().includes(q) ||
+        e.subject.toLowerCase().includes(q) ||
         e.from.toLowerCase().includes(q) ||
-        e.to.toLowerCase().includes(q)
+        e.to.toLowerCase().includes(q) ||
+        e.result.toLowerCase().includes(q)
       );
     });
   }, [events, query, activeTypes, mode]);
@@ -63,7 +106,7 @@ export default function LogTable({ title, events, mode, onSearch, loading, empty
   }
 
   return (
-    <Box sx={{ border: 1, borderColor: "divider", display: "flex", flexDirection: "column", minHeight: 0 }}>
+    <Box sx={{ border: 1, borderColor: "divider", display: "flex", flexDirection: "column", minHeight: 0, width: "100%" }}>
       <Stack
         direction={{ xs: "column", md: "row" }}
         spacing={1.5}
@@ -86,7 +129,7 @@ export default function LogTable({ title, events, mode, onSearch, loading, empty
               size="small"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={mode === "history" ? "user@domain.com / IP / 제목 키워드" : "발신·수신·내용 검색"}
+              placeholder={mode === "history" ? "user@domain.com / IP / 제목 키워드" : "발신·수신·제목·처리결과 검색"}
               sx={{ width: 260 }}
               InputProps={{
                 startAdornment: (
@@ -127,6 +170,14 @@ export default function LogTable({ title, events, mode, onSearch, loading, empty
             </Stack>
           )}
 
+          {onRefresh && (
+            <Tooltip title="새로고침">
+              <IconButton size="small" onClick={onRefresh}>
+                <RefreshIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+
           <Button
             size="small"
             startIcon={<FileDownloadIcon fontSize="small" />}
@@ -165,66 +216,104 @@ export default function LogTable({ title, events, mode, onSearch, loading, empty
         </Stack>
       </Stack>
 
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: GRID_COLS,
-          px: 2,
-          py: 0.75,
-          borderBottom: 1,
-          borderColor: "divider",
-          color: "text.secondary",
-        }}
-      >
-        {["시간", "유형", "발신", "수신", "내용"].map((h) => (
-          <Typography key={h} variant="caption" sx={{ fontWeight: 600 }}>
-            {h}
-          </Typography>
-        ))}
-      </Box>
+      <Box className="log-scroll thin-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0 }}>
+        <Box sx={{ minWidth: GRID_MIN_WIDTH }}>
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: GRID_COLS,
+              px: 2,
+              py: 0.75,
+              borderBottom: 1,
+              borderColor: "divider",
+              color: "text.secondary",
+              position: "sticky",
+              top: 0,
+              bgcolor: "background.paper",
+              zIndex: 1,
+            }}
+          >
+            {["시간", "유형", "발신", "수신", "내용(제목)", "처리결과", "발신자IP", "수신자IP"].map((h) => (
+              <Typography key={h} variant="caption" sx={{ fontWeight: 600 }}>
+                {h}
+              </Typography>
+            ))}
+          </Box>
 
-      <Box sx={{ overflowY: "auto", flex: 1, minHeight: 0 }} className="log-scroll thin-scroll">
-        {filtered.length === 0 ? (
-          <Typography variant="body2" color="text.disabled" sx={{ p: 3, textAlign: "center" }}>
-            {emptyHint}
-          </Typography>
-        ) : (
-          filtered.map((ev, i) => (
-            <Box
-              key={i}
-              sx={{
-                display: "grid",
-                gridTemplateColumns: GRID_COLS,
-                px: 2,
-                py: 0.75,
-                borderBottom: 1,
-                borderColor: "divider",
-                alignItems: "start",
-                transition: "background-color .12s",
-                "&:hover": { bgcolor: "action.hover" },
-              }}
-            >
-              <Typography variant="body2" sx={{ fontFamily: monoFont, color: "text.secondary", fontSize: 12.5 }}>
-                {ev.when}
-              </Typography>
-              <Typography
-                variant="body2"
-                sx={{ fontFamily: monoFont, fontWeight: 600, fontSize: 12.5, color: eventColors[ev.type] ?? "text.primary" }}
-              >
-                {ev.glyph} {ev.type}
-              </Typography>
-              <Typography variant="body2" sx={{ fontFamily: monoFont, fontSize: 12.5, wordBreak: "break-all" }}>
-                {ev.from}
-              </Typography>
-              <Typography variant="body2" sx={{ fontFamily: monoFont, fontSize: 12.5, wordBreak: "break-all" }}>
-                {ev.to}
-              </Typography>
-              <Typography variant="body2" sx={{ fontSize: 13 }}>
-                {ev.text}
-              </Typography>
-            </Box>
-          ))
-        )}
+          {filtered.length === 0 ? (
+            <Typography variant="body2" color="text.disabled" sx={{ p: 3, textAlign: "center" }}>
+              {emptyHint}
+            </Typography>
+          ) : (
+            filtered.map((ev, i) => {
+              const isFailure = FAILURE_TYPES.has(ev.type);
+              return (
+                <Box
+                  key={i}
+                  sx={{
+                    display: "grid",
+                    gridTemplateColumns: GRID_COLS,
+                    px: 2,
+                    py: 0.875,
+                    borderBottom: 1,
+                    borderColor: "divider",
+                    alignItems: "center",
+                    bgcolor: i % 2 === 1 ? "action.hover" : "transparent",
+                    transition: "background-color .12s",
+                    "&:hover": { bgcolor: "action.selected" },
+                  }}
+                >
+                  <Typography variant="body2" sx={{ fontFamily: monoFont, color: "text.secondary", fontSize: 12.5 }}>
+                    {ev.when}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      fontFamily: monoFont,
+                      fontWeight: 700,
+                      fontSize: 12.5,
+                      color: eventColors[ev.type] ?? "text.primary",
+                    }}
+                  >
+                    {ev.glyph} {ev.type}
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontFamily: monoFont, fontSize: 12.5, wordBreak: "break-all" }}>
+                    {ev.from}
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontFamily: monoFont, fontSize: 12.5, wordBreak: "break-all" }}>
+                    {ev.to}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ fontSize: 13, color: ev.subject ? "text.primary" : "text.disabled" }}
+                    noWrap
+                    title={ev.subject}
+                  >
+                    {ev.subject || "(제목 없음)"}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    noWrap
+                    title={ev.result}
+                    sx={{
+                      fontSize: 12.5,
+                      fontWeight: isFailure ? 700 : 400,
+                      color: isFailure ? eventColors[ev.type] : "text.secondary",
+                    }}
+                  >
+                    {ev.result}
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontFamily: monoFont, fontSize: 12, color: "text.secondary" }}>
+                    {ev.fromIp || "—"}
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontFamily: monoFont, fontSize: 12, color: "text.secondary" }}>
+                    {ev.toIp || "—"}
+                  </Typography>
+                </Box>
+              );
+            })
+          )}
+        </Box>
       </Box>
     </Box>
   );

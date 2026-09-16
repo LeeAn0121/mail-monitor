@@ -35,22 +35,28 @@ var webDistFS embed.FS
 // view of Event so the frontend never needs to know about EventType's int
 // encoding.
 type webEvent struct {
-	When  string `json:"when"`
-	Type  string `json:"type"`
-	Glyph string `json:"glyph"`
-	Text  string `json:"text"`
-	From  string `json:"from"`
-	To    string `json:"to"`
+	When    string `json:"when"`
+	Type    string `json:"type"`
+	Glyph   string `json:"glyph"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Subject string `json:"subject"`
+	Result  string `json:"result"`
+	FromIP  string `json:"fromIp"`
+	ToIP    string `json:"toIp"`
 }
 
 func toWebEvent(ev Event) webEvent {
 	return webEvent{
-		When:  ev.When,
-		Type:  ev.Type.Label(),
-		Glyph: ev.Type.Glyph(),
-		Text:  ev.Text,
-		From:  ev.From,
-		To:    ev.To,
+		When:    ev.When,
+		Type:    ev.Type.Label(),
+		Glyph:   ev.Type.Glyph(),
+		From:    ev.From,
+		To:      ev.To,
+		Subject: ev.Subject,
+		Result:  ev.Result,
+		FromIP:  ev.FromIP,
+		ToIP:    ev.ToIP,
 	}
 }
 

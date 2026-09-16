@@ -2,9 +2,12 @@ export interface WebEvent {
   when: string;
   type: string;
   glyph: string;
-  text: string;
   from: string;
   to: string;
+  subject: string;
+  result: string;
+  fromIp: string;
+  toIp: string;
 }
 
 export interface RankEntry {
