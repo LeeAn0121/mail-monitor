@@ -14,18 +14,13 @@ import SearchIcon from "@mui/icons-material/Search";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import PrintIcon from "@mui/icons-material/Print";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import { DataGrid } from "@mui/x-data-grid";
+import type { GridColDef } from "@mui/x-data-grid";
 import { EVENT_TYPES } from "../types";
 import type { WebEvent } from "../types";
 import { eventColors, monoFont } from "../theme";
 import { exportCSV, exportXLSX } from "../export";
 import { loadWithTTL, saveWithTTL } from "../persist";
-
-// 시간/유형/발신자IP/수신자IP are fixed-width so addresses and results — the
-// two columns worth the most horizontal room — get it. The whole grid has a
-// min-width and scrolls horizontally rather than squeezing columns past
-// legibility on narrow screens.
-const GRID_COLS = "96px 66px 1.3fr 1.3fr 1.8fr 1fr 108px 108px";
-const GRID_MIN_WIDTH = 980;
 
 const LIVE_FILTER_KEY = "mm.liveFilter";
 
@@ -48,6 +43,11 @@ interface Props {
 }
 
 const FAILURE_TYPES = new Set(["BOUNCE", "REJECT"]);
+
+// Every text column wraps instead of truncating — a log viewer's whole job
+// is to show what happened, and a clipped bounce reason or subject defeats
+// that. Rows grow to fit (getRowHeight="auto" below) rather than clipping.
+const wrapCell = { whiteSpace: "normal", lineHeight: 1.4, py: 1 } as const;
 
 export default function LogTable({
   title,
@@ -90,6 +90,63 @@ export default function LogTable({
       );
     });
   }, [events, query, activeTypes, mode]);
+
+  const rows = useMemo(() => filtered.map((e, i) => ({ id: i, ...e })), [filtered]);
+
+  const columns: GridColDef<(typeof rows)[number]>[] = useMemo(
+    () => [
+      {
+        field: "when",
+        headerName: "시간",
+        width: 100,
+        cellClassName: "mm-mono",
+      },
+      {
+        field: "type",
+        headerName: "유형",
+        width: 84,
+        cellClassName: "mm-mono",
+        renderCell: (p) => (
+          <span style={{ color: eventColors[p.value as string] ?? "inherit", fontWeight: 700 }}>
+            {p.row.glyph} {p.value}
+          </span>
+        ),
+      },
+      { field: "from", headerName: "발신", flex: 1.1, minWidth: 160, cellClassName: "mm-mono", sx: wrapCell },
+      { field: "to", headerName: "수신", flex: 1.1, minWidth: 160, cellClassName: "mm-mono", sx: wrapCell },
+      {
+        field: "subject",
+        headerName: "내용(제목)",
+        flex: 1.6,
+        minWidth: 200,
+        sx: wrapCell,
+        renderCell: (p) =>
+          p.value ? (
+            <span>{p.value}</span>
+          ) : (
+            <span style={{ opacity: 0.5 }}>(제목 없음)</span>
+          ),
+      },
+      {
+        field: "result",
+        headerName: "처리결과",
+        flex: 1.4,
+        minWidth: 200,
+        sx: wrapCell,
+        renderCell: (p) => {
+          const failure = FAILURE_TYPES.has(p.row.type);
+          return (
+            <span style={{ fontWeight: failure ? 700 : 400, color: failure ? eventColors[p.row.type] : "inherit" }}>
+              {p.value}
+            </span>
+          );
+        },
+      },
+      { field: "fromIp", headerName: "발신자IP", width: 130, cellClassName: "mm-mono mm-dim" },
+      { field: "toIp", headerName: "수신자IP", width: 130, cellClassName: "mm-mono mm-dim" },
+    ],
+    [],
+  );
 
   function toggleType(type: string) {
     setActiveTypes((prev) => {
@@ -216,104 +273,36 @@ export default function LogTable({
         </Stack>
       </Stack>
 
-      <Box className="log-scroll thin-scroll" sx={{ overflow: "auto", flex: 1, minHeight: 0 }}>
-        <Box sx={{ minWidth: GRID_MIN_WIDTH }}>
-          <Box
-            sx={{
-              display: "grid",
-              gridTemplateColumns: GRID_COLS,
-              px: 2,
-              py: 0.75,
+      <Box sx={{ flex: 1, minHeight: 0 }} className="thin-scroll">
+        <DataGrid
+          rows={rows}
+          columns={columns}
+          density="standard"
+          getRowHeight={() => "auto"}
+          disableRowSelectionOnClick
+          hideFooterSelectedRowCount
+          localeText={{ noRowsLabel: emptyHint }}
+          pageSizeOptions={[25, 50, 100]}
+          initialState={{ pagination: { paginationModel: { pageSize: 50, page: 0 } } }}
+          sx={{
+            border: "none",
+            height: "100%",
+            fontSize: 13,
+            "--DataGrid-rowBorderColor": "var(--mui-palette-divider, #1e2730)",
+            "& .MuiDataGrid-columnHeaders": {
+              bgcolor: "background.paper",
               borderBottom: 1,
               borderColor: "divider",
-              color: "text.secondary",
-              position: "sticky",
-              top: 0,
-              bgcolor: "background.paper",
-              zIndex: 1,
-            }}
-          >
-            {["시간", "유형", "발신", "수신", "내용(제목)", "처리결과", "발신자IP", "수신자IP"].map((h) => (
-              <Typography key={h} variant="caption" sx={{ fontWeight: 600 }}>
-                {h}
-              </Typography>
-            ))}
-          </Box>
-
-          {filtered.length === 0 ? (
-            <Typography variant="body2" color="text.disabled" sx={{ p: 3, textAlign: "center" }}>
-              {emptyHint}
-            </Typography>
-          ) : (
-            filtered.map((ev, i) => {
-              const isFailure = FAILURE_TYPES.has(ev.type);
-              return (
-                <Box
-                  key={i}
-                  sx={{
-                    display: "grid",
-                    gridTemplateColumns: GRID_COLS,
-                    px: 2,
-                    py: 0.875,
-                    borderBottom: 1,
-                    borderColor: "divider",
-                    alignItems: "center",
-                    bgcolor: i % 2 === 1 ? "action.hover" : "transparent",
-                    transition: "background-color .12s",
-                    "&:hover": { bgcolor: "action.selected" },
-                  }}
-                >
-                  <Typography variant="body2" sx={{ fontFamily: monoFont, color: "text.secondary", fontSize: 12.5 }}>
-                    {ev.when}
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      fontFamily: monoFont,
-                      fontWeight: 700,
-                      fontSize: 12.5,
-                      color: eventColors[ev.type] ?? "text.primary",
-                    }}
-                  >
-                    {ev.glyph} {ev.type}
-                  </Typography>
-                  <Typography variant="body2" sx={{ fontFamily: monoFont, fontSize: 12.5, wordBreak: "break-all" }}>
-                    {ev.from}
-                  </Typography>
-                  <Typography variant="body2" sx={{ fontFamily: monoFont, fontSize: 12.5, wordBreak: "break-all" }}>
-                    {ev.to}
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    sx={{ fontSize: 13, color: ev.subject ? "text.primary" : "text.disabled" }}
-                    noWrap
-                    title={ev.subject}
-                  >
-                    {ev.subject || "(제목 없음)"}
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    noWrap
-                    title={ev.result}
-                    sx={{
-                      fontSize: 12.5,
-                      fontWeight: isFailure ? 700 : 400,
-                      color: isFailure ? eventColors[ev.type] : "text.secondary",
-                    }}
-                  >
-                    {ev.result}
-                  </Typography>
-                  <Typography variant="body2" sx={{ fontFamily: monoFont, fontSize: 12, color: "text.secondary" }}>
-                    {ev.fromIp || "—"}
-                  </Typography>
-                  <Typography variant="body2" sx={{ fontFamily: monoFont, fontSize: 12, color: "text.secondary" }}>
-                    {ev.toIp || "—"}
-                  </Typography>
-                </Box>
-              );
-            })
-          )}
-        </Box>
+            },
+            "& .MuiDataGrid-columnHeaderTitle": { fontWeight: 700, fontSize: 12 },
+            "& .MuiDataGrid-cell": { borderColor: "divider", alignItems: "flex-start" },
+            "& .MuiDataGrid-cell.mm-mono": { fontFamily: monoFont, fontSize: 12.5 },
+            "& .MuiDataGrid-cell.mm-dim": { color: "text.secondary" },
+            "& .MuiDataGrid-row:hover": { bgcolor: "action.hover" },
+            "& .MuiDataGrid-footerContainer": { borderColor: "divider" },
+            "& .MuiDataGrid-virtualScroller": { minHeight: 80 },
+          }}
+        />
       </Box>
     </Box>
   );
