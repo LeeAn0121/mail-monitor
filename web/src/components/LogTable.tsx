@@ -87,6 +87,11 @@ export default function LogTable({
   });
   const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
   const [selected, setSelected] = useState<WebEvent | null>(null);
+  // Controlled rather than left to DataGrid's uncontrolled initialState —
+  // live mode keeps replacing `rows` with a new array on every SSE event,
+  // and an uncontrolled paginationModel doesn't reliably survive that (the
+  // "Rows per page" selector would silently stop doing anything).
+  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 50 });
 
   useEffect(() => {
     if (mode !== "live") return;
@@ -374,7 +379,8 @@ export default function LogTable({
           onRowClick={(p: GridRowParams<(typeof rows)[number]>) => setSelected(p.row)}
           localeText={{ noRowsLabel: emptyHint }}
           pageSizeOptions={[25, 50, 100]}
-          initialState={{ pagination: { paginationModel: { pageSize: 50, page: 0 } } }}
+          paginationModel={paginationModel}
+          onPaginationModelChange={setPaginationModel}
           sx={{
             border: "none",
             height: "100%",
