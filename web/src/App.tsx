@@ -11,16 +11,20 @@ import LogTable from "./components/LogTable";
 import NavRail from "./components/NavRail";
 import type { View } from "./components/NavRail";
 import RankingList from "./components/RankingList";
+import RefreshIntervalPicker from "./components/RefreshIntervalPicker";
 import StatusStrip from "./components/StatusStrip";
 import { accentSignal, eventColors, monoFont } from "./theme";
 import { useBlocklist } from "./useBlocklist";
 import { useDashboard } from "./useDashboard";
 import { useHistorySearch } from "./useHistorySearch";
+import { useRefreshInterval } from "./useRefreshInterval";
 import { useVersion } from "./useVersion";
 
 export default function App() {
   const [view, setView] = useState<View>("live");
-  const { connected, loaded, events, counts, senderRanking, receiverRanking, alertActive, refresh } = useDashboard();
+  const { intervalMs, setIntervalMs } = useRefreshInterval();
+  const { connected, loaded, events, counts, senderRanking, receiverRanking, alertActive, refresh } =
+    useDashboard(intervalMs);
   const history = useHistorySearch();
   const versionInfo = useVersion();
   const blocklist = useBlocklist();
@@ -78,7 +82,8 @@ export default function App() {
               </Link>
             )}
           </Stack>
-          <Stack direction="row" spacing={1} alignItems="center">
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <RefreshIntervalPicker value={intervalMs} onChange={setIntervalMs} />
             {alertActive && (
               <Chip
                 size="small"

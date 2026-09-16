@@ -2,10 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import type { RankEntry, Snapshot, WebEvent } from "./types";
 
 const MAX_FEED = 300;
-// How often we re-poll /api/snapshot just for alertActive and the sender/
-// receiver rankings — the event feed itself stays live via SSE and never
-// needs this poll, so a slow interval is fine.
-const RESYNC_MS = 5000;
 
 interface FeedState {
   connected: boolean;
@@ -21,7 +17,12 @@ export interface DashboardState extends FeedState {
   refresh: () => void;
 }
 
-export function useDashboard(): DashboardState {
+// intervalMs controls how often we re-poll /api/snapshot for alertActive
+// and the sender/receiver rankings — the event feed itself stays live via
+// SSE regardless and never depends on this poll, so a slow interval is
+// fine; it's user-configurable (see RefreshIntervalPicker) precisely
+// because there's no freshness requirement forcing a particular value.
+export function useDashboard(intervalMs: number): DashboardState {
   const [state, setState] = useState<FeedState>({
     connected: false,
     loaded: false,
@@ -32,8 +33,11 @@ export function useDashboard(): DashboardState {
     alertActive: false,
   });
   const loadedSnapshot = useRef(false);
-  const resyncRef = useRef<() => void>(() => {});
+  const resyncRef = useRef<(opts?: { reload?: boolean }) => void>(() => {});
 
+  // Mount-once: initial snapshot fetch (with quick-retry until it succeeds)
+  // and the SSE connection. Split from the interval effect below so
+  // changing intervalMs doesn't tear down and reconnect the SSE stream.
   useEffect(() => {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -70,9 +74,8 @@ export function useDashboard(): DashboardState {
       }
     }
 
-    resyncRef.current = () => resync({ reload: true });
+    resyncRef.current = resync;
     resync();
-    const resyncTimer = setInterval(resync, RESYNC_MS);
 
     const es = new EventSource("/api/stream");
     es.onopen = () => setState((prev) => ({ ...prev, connected: true }));
@@ -88,11 +91,17 @@ export function useDashboard(): DashboardState {
 
     return () => {
       cancelled = true;
-      clearInterval(resyncTimer);
       clearTimeout(retryTimer);
       es.close();
     };
   }, []);
 
-  return { ...state, refresh: () => resyncRef.current() };
+  // Separate effect so changing the user-configurable interval just resets
+  // this timer, without re-running the mount-once setup above.
+  useEffect(() => {
+    const resyncTimer = setInterval(() => resyncRef.current(), intervalMs);
+    return () => clearInterval(resyncTimer);
+  }, [intervalMs]);
+
+  return { ...state, refresh: () => resyncRef.current({ reload: true }) };
 }
