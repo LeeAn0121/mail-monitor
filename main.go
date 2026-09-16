@@ -294,12 +294,14 @@ func (m *model) processLine(line string) *Event {
 		if toRaw == "-" {
 			return nil
 		}
-		to := m.addr(toRaw)
+		finalTo := m.addr(toRaw)
+		to := finalTo
 		forwarded := false
+		var origTo string
 		if om := origToRe.FindStringSubmatch(rest); om != nil && om[1] != "" {
-			origTo := m.addr(om[1])
-			forwarded = origTo != to
-			to = toWithForward(to, origTo)
+			origTo = m.addr(om[1])
+			forwarded = origTo != finalTo
+			to = toWithForward(finalTo, origTo)
 		}
 		from, ok := m.qidFrom[qid]
 		if !ok {
@@ -324,7 +326,7 @@ func (m *model) processLine(line string) *Event {
 				result := "수신 완료"
 				if forwarded {
 					typ = EventForward
-					result = "전달 완료"
+					result = fmt.Sprintf("%s 수신 주소로 발송됨 → %s(으)로 전달", origTo, finalTo)
 				}
 				return newEvent(when, typ, line, from, toRaw,
 					withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)).
