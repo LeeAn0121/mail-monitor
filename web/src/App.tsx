@@ -101,8 +101,11 @@ export default function App() {
                 events={history.results}
                 mode="history"
                 onSearch={history.search}
-                onRefresh={() => history.search(history.searchedFor ?? history.initialQuery)}
+                onRefresh={() =>
+                  history.search(history.searchedFor ?? history.initialQuery, history.appliedRange)
+                }
                 initialQuery={history.initialQuery}
+                initialRange={history.initialRange}
                 loading={history.loading}
                 emptyHint={
                   history.error

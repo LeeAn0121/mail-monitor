@@ -239,6 +239,20 @@ func releaseURL(version string) string {
 	return "https://github.com/LeeAn0121/mail-monitor/releases/tag/v" + version
 }
 
+// parseTimeParam parses an RFC3339 datetime query param (what the
+// dashboard's date/time range picker sends), returning nil for an empty or
+// unparseable value so /api/history's range filter is simply skipped.
+func parseTimeParam(v string) *time.Time {
+	if v == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return nil
+	}
+	return &t
+}
+
 // startWebServer runs the dashboard's HTTP server in the background for the
 // lifetime of the process. Errors (e.g. port already in use) are reported to
 // stderr rather than crashing mail-monitor — the TUI keeps working either way.
@@ -266,7 +280,9 @@ func startWebServer(addr string, state *webState, hub *sseHub, db *sql.DB) {
 	// before mail-monitor started or from earlier days.
 	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
-		res := searchHistory(db, q)
+		from := parseTimeParam(r.URL.Query().Get("from"))
+		to := parseTimeParam(r.URL.Query().Get("to"))
+		res := searchHistory(db, q, from, to)
 		w.Header().Set("Content-Type", "application/json")
 		if res.err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

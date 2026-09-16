@@ -16,11 +16,15 @@ import PrintIcon from "@mui/icons-material/Print";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { DataGrid } from "@mui/x-data-grid";
 import type { GridColDef, GridRowParams } from "@mui/x-data-grid";
+import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker";
+import dayjs from "dayjs";
+import type { Dayjs } from "dayjs";
 import { EVENT_TYPES } from "../types";
 import type { WebEvent } from "../types";
 import { eventColors, monoFont } from "../theme";
 import { exportCSV, exportXLSX } from "../export";
 import { loadWithTTL, saveWithTTL } from "../persist";
+import type { DateRange } from "../useHistorySearch";
 import EventDetailDialog from "./EventDetailDialog";
 
 const LIVE_FILTER_KEY = "mm.liveFilter";
@@ -35,9 +39,10 @@ interface Props {
   events: WebEvent[];
   /** Live mode filters client-side; history mode delegates to onSearch. */
   mode: "live" | "history";
-  onSearch?: (query: string) => void;
+  onSearch?: (query: string, range: DateRange) => void;
   onRefresh?: () => void;
   initialQuery?: string;
+  initialRange?: DateRange;
   loading?: boolean;
   emptyHint: string;
   filename: string;
@@ -57,6 +62,7 @@ export default function LogTable({
   onSearch,
   onRefresh,
   initialQuery,
+  initialRange,
   loading,
   emptyHint,
   filename,
@@ -65,6 +71,10 @@ export default function LogTable({
     if (mode === "history") return initialQuery ?? "";
     return loadWithTTL<LiveFilter>(LIVE_FILTER_KEY)?.query ?? "";
   });
+  const [fromDate, setFromDate] = useState<Dayjs | null>(() =>
+    initialRange?.from ? dayjs(initialRange.from) : null,
+  );
+  const [toDate, setToDate] = useState<Dayjs | null>(() => (initialRange?.to ? dayjs(initialRange.to) : null));
   const [activeTypes, setActiveTypes] = useState<Set<string>>(() => {
     if (mode !== "live") return new Set(EVENT_TYPES);
     const saved = loadWithTTL<LiveFilter>(LIVE_FILTER_KEY)?.types;
@@ -171,7 +181,15 @@ export default function LogTable({
 
   function submitSearch(e: React.FormEvent) {
     e.preventDefault();
-    onSearch?.(query.trim());
+    onSearch?.(query.trim(), {
+      from: fromDate ? fromDate.toISOString() : null,
+      to: toDate ? toDate.toISOString() : null,
+    });
+  }
+
+  function clearRange() {
+    setFromDate(null);
+    setToDate(null);
   }
 
   return (
@@ -211,9 +229,33 @@ export default function LogTable({
           </Box>
 
           {mode === "history" && (
-            <Button type="submit" onClick={submitSearch} size="small" variant="outlined" disabled={loading}>
-              {loading ? "검색 중..." : "검색"}
-            </Button>
+            <>
+              <DateTimePicker
+                label="시작"
+                value={fromDate}
+                onChange={setFromDate}
+                ampm={false}
+                format="YYYY-MM-DD HH:mm"
+                slotProps={{ textField: { size: "small", sx: { width: 190 } } }}
+              />
+              <DateTimePicker
+                label="종료"
+                value={toDate}
+                onChange={setToDate}
+                ampm={false}
+                format="YYYY-MM-DD HH:mm"
+                minDateTime={fromDate ?? undefined}
+                slotProps={{ textField: { size: "small", sx: { width: 190 } } }}
+              />
+              {(fromDate || toDate) && (
+                <Button size="small" onClick={clearRange}>
+                  기간 초기화
+                </Button>
+              )}
+              <Button type="submit" onClick={submitSearch} size="small" variant="outlined" disabled={loading}>
+                {loading ? "검색 중..." : "검색"}
+              </Button>
+            </>
           )}
 
           {mode === "live" && (

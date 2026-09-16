@@ -607,12 +607,32 @@ type historyResultsMsg struct {
 	err    error
 }
 
+// parseEventWhen recovers a full time.Time from an Event.When string
+// ("MM-DD HH:MM:SS", no year — see extractWhen) for date-range filtering.
+// Since the log itself never records a year, this assumes ref's year and
+// rolls back one year if that would put the timestamp more than a day in
+// ref's future — the one case that actually happens in practice is a
+// rotated log from late December being searched in early January.
+func parseEventWhen(when string, ref time.Time) (time.Time, bool) {
+	t, err := time.Parse("01-02 15:04:05", when)
+	if err != nil {
+		return time.Time{}, false
+	}
+	t = time.Date(ref.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), 0, ref.Location())
+	if t.After(ref.Add(24 * time.Hour)) {
+		t = t.AddDate(-1, 0, 0)
+	}
+	return t, true
+}
+
 // searchHistory scans logPath and its rotated siblings for events matching
 // query, using a correlation state independent of the live model's (own
 // qidFrom/qidIP/qidSubject/nameCache) so it can run concurrently on its own
 // goroutine without racing the live view. It shares the *sql.DB handle,
-// which is safe for concurrent use.
-func searchHistory(db *sql.DB, query string) historyResultsMsg {
+// which is safe for concurrent use. from/to optionally bound the search to
+// a date range (either or both may be nil); the TUI's own `/` search always
+// passes nil, nil.
+func searchHistory(db *sql.DB, query string, from, to *time.Time) historyResultsMsg {
 	sm := &model{
 		qidFrom:    make(map[string]string),
 		qidIP:      make(map[string]string),
@@ -622,6 +642,7 @@ func searchHistory(db *sql.DB, query string) historyResultsMsg {
 	}
 
 	needle := strings.ToLower(query)
+	now := time.Now()
 	// ring holds only the last maxHistoryResults matches. Rather than
 	// shifting the slice left on every overflow (O(n) per match, O(n²) over
 	// a large scan), write into a fixed-size circular buffer — O(1) per
@@ -640,6 +661,18 @@ func searchHistory(db *sql.DB, query string) historyResultsMsg {
 			if needle != "" && !strings.Contains(ev.rawLower, needle) &&
 				!strings.Contains(ev.textLower, needle) {
 				return
+			}
+			if from != nil || to != nil {
+				t, ok := parseEventWhen(ev.When, now)
+				if !ok {
+					return
+				}
+				if from != nil && t.Before(*from) {
+					return
+				}
+				if to != nil && t.After(*to) {
+					return
+				}
 			}
 			ring[total%maxHistoryResults] = *ev
 			total++
@@ -667,7 +700,7 @@ func searchHistory(db *sql.DB, query string) historyResultsMsg {
 
 func searchHistoryCmd(db *sql.DB, query string) tea.Cmd {
 	return func() tea.Msg {
-		return searchHistory(db, query)
+		return searchHistory(db, query, nil, nil)
 	}
 }
 
