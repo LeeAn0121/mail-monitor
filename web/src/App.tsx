@@ -4,6 +4,7 @@ import Chip from "@mui/material/Chip";
 import Link from "@mui/material/Link";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import BlockList from "./components/BlockList";
 import LogTable from "./components/LogTable";
 import NavRail from "./components/NavRail";
 import type { View } from "./components/NavRail";
@@ -133,6 +134,12 @@ export default function App() {
                 }
                 filename="mail-monitor_history"
               />
+            </Box>
+          )}
+
+          {view === "block" && (
+            <Box sx={{ display: "flex", flex: 1, minHeight: 0 }}>
+              <BlockList />
             </Box>
           )}
         </Box>

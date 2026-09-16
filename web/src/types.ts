@@ -34,6 +34,11 @@ export interface VersionInfo {
   releasesUrl: string;
 }
 
+export interface BlockedSender {
+  email: string;
+  addedAt: string;
+}
+
 export interface HistoryResponse {
   events: WebEvent[];
   error?: string;

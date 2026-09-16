@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -294,6 +295,53 @@ func startWebServer(addr string, state *webState, hub *sseHub, db *sql.DB) {
 			events = append(events, toWebEvent(e))
 		}
 		json.NewEncoder(w).Encode(map[string]any{"events": events})
+	})
+
+	// /api/blocklist manages /etc/postfix/header_checks REJECT rules — the
+	// same file and line format /usr/local/bin/block-sender uses, so either
+	// one sees what the other added.
+	mux.HandleFunc("/api/blocklist", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			list, err := listBlockedSenders()
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"blocked": list})
+
+		case http.MethodPost:
+			var body struct {
+				Email string `json:"email"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "잘못된 요청입니다"})
+				return
+			}
+			already, err := blockSender(strings.TrimSpace(body.Email))
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"alreadyBlocked": already})
+
+		case http.MethodDelete:
+			email := strings.TrimSpace(r.URL.Query().Get("email"))
+			found, err := unblockSender(email)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"found": found})
+
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
 	})
 
 	mux.HandleFunc("/api/stream", func(w http.ResponseWriter, r *http.Request) {

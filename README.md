@@ -56,6 +56,12 @@ journalctl -u mail-monitor -f          # 로그
   검색어 옆 시작/종료 날짜·시간(분 단위)으로 조회 기간을 좁힐 수 있다
   (MUI X Date Pickers). 로그 자체엔 연도가 안 남기 때문에 연말/연초 경계에
   걸친 로테이션 로그는 현재 연도 기준으로 추정해서 비교한다.
+- **발신자 차단**: `/etc/postfix/header_checks`에 REJECT 규칙을 추가/삭제한다.
+  `/usr/local/bin/block-sender <이메일>` CLI와 완전히 같은 파일·같은 줄
+  포맷을 쓰므로 둘 중 아무 걸로나 등록해도 서로 인식하고, 추가/삭제 시
+  자동으로 `postfix reload`까지 해준다. root로 도는 systemd 서비스에서만
+  동작한다 — 터미널에서 `mail-monitor`를 직접(비-root) 실행하면 이 화면은
+  "root 권한이 필요합니다" 에러만 뜬다.
 
 실시간/이력 화면 모두 시간/유형/발신/수신/원본수신(별칭)/내용(제목)/처리결과/발신자IP/
 수신자IP 9개 컬럼을 보여준다 (MUI X DataGrid — 컬럼 너비 드래그로 조절 가능, 긴 텍스트는
