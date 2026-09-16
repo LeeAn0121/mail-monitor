@@ -2,6 +2,8 @@ import { useState } from "react";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import Link from "@mui/material/Link";
+import Snackbar from "@mui/material/Snackbar";
+import Alert from "@mui/material/Alert";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import BlockList from "./components/BlockList";
@@ -11,6 +13,7 @@ import type { View } from "./components/NavRail";
 import RankingList from "./components/RankingList";
 import StatusStrip from "./components/StatusStrip";
 import { accentSignal, eventColors, monoFont } from "./theme";
+import { useBlocklist } from "./useBlocklist";
 import { useDashboard } from "./useDashboard";
 import { useHistorySearch } from "./useHistorySearch";
 import { useVersion } from "./useVersion";
@@ -20,6 +23,23 @@ export default function App() {
   const { connected, loaded, events, counts, senderRanking, receiverRanking, alertActive, refresh } = useDashboard();
   const history = useHistorySearch();
   const versionInfo = useVersion();
+  const blocklist = useBlocklist();
+  const [toast, setToast] = useState<{ message: string; severity: "success" | "error" } | null>(null);
+
+  const blockedEmails = new Set(blocklist.blocked.map((b) => b.email));
+
+  async function handleBlockSender(email: string) {
+    if (!email || email === "-" || email === "<>") return;
+    if (blockedEmails.has(email)) {
+      setToast({ message: `이미 차단된 주소입니다: ${email}`, severity: "success" });
+      return;
+    }
+    if (!window.confirm(`이 발신자를 차단할까요?\n${email}`)) return;
+    const err = await blocklist.block(email);
+    setToast(
+      err ? { message: err, severity: "error" } : { message: `차단했습니다: ${email}`, severity: "success" },
+    );
+  }
 
   return (
     <Box sx={{ display: "flex", height: "100vh", bgcolor: "background.default" }}>
@@ -98,6 +118,8 @@ export default function App() {
                   events={events}
                   mode="live"
                   onRefresh={refresh}
+                  onBlockSender={handleBlockSender}
+                  blockedEmails={blockedEmails}
                   emptyHint={loaded ? "이벤트를 기다리는 중..." : "불러오는 중..."}
                   filename="mail-monitor_live"
                 />
@@ -122,6 +144,8 @@ export default function App() {
                 onRefresh={() =>
                   history.search(history.searchedFor ?? history.initialQuery, history.appliedRange)
                 }
+                onBlockSender={handleBlockSender}
+                blockedEmails={blockedEmails}
                 initialQuery={history.initialQuery}
                 initialRange={history.initialRange}
                 loading={history.loading}
@@ -139,11 +163,24 @@ export default function App() {
 
           {view === "block" && (
             <Box sx={{ display: "flex", flex: 1, minHeight: 0 }}>
-              <BlockList />
+              <BlockList blocklist={blocklist} />
             </Box>
           )}
         </Box>
       </Box>
+
+      <Snackbar
+        open={!!toast}
+        autoHideDuration={3000}
+        onClose={() => setToast(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        {toast ? (
+          <Alert severity={toast.severity} onClose={() => setToast(null)} sx={{ border: 1, borderColor: "divider" }}>
+            {toast.message}
+          </Alert>
+        ) : undefined}
+      </Snackbar>
     </Box>
   );
 }

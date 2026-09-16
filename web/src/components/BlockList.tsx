@@ -12,10 +12,10 @@ import BlockIcon from "@mui/icons-material/Block";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { monoFont } from "../theme";
-import { useBlocklist } from "../useBlocklist";
+import type { useBlocklist } from "../useBlocklist";
 
-export default function BlockList() {
-  const { blocked, loading, error, pending, block, unblock, refresh } = useBlocklist();
+export default function BlockList({ blocklist }: { blocklist: ReturnType<typeof useBlocklist> }) {
+  const { blocked, loading, error, pending, block, unblock, refresh } = blocklist;
   const [email, setEmail] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 

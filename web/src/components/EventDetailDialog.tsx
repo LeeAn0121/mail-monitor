@@ -12,6 +12,7 @@ import CloseIcon from "@mui/icons-material/Close";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import CheckIcon from "@mui/icons-material/Check";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
+import BlockIcon from "@mui/icons-material/Block";
 import type { WebEvent } from "../types";
 import { eventColors, monoFont } from "../theme";
 
@@ -63,7 +64,17 @@ function Field({ label, value, mono, color }: { label: string; value: string; mo
 
 type CopyState = "idle" | "copied" | "failed";
 
-export default function EventDetailDialog({ event, onClose }: { event: WebEvent | null; onClose: () => void }) {
+export default function EventDetailDialog({
+  event,
+  onClose,
+  onBlockSender,
+  alreadyBlocked,
+}: {
+  event: WebEvent | null;
+  onClose: () => void;
+  onBlockSender?: (email: string) => void;
+  alreadyBlocked?: boolean;
+}) {
   const [copyState, setCopyState] = useState<CopyState>("idle");
 
   async function copyRaw() {
@@ -92,13 +103,25 @@ export default function EventDetailDialog({ event, onClose }: { event: WebEvent 
           </DialogTitle>
           <DialogContent dividers>
             <Stack spacing={2}>
-              <Stack direction="row" spacing={3}>
+              <Stack direction="row" spacing={3} alignItems="flex-end">
                 <Box sx={{ flex: 1 }}>
                   <Field label="발신" value={event.fromDisplay} mono />
                 </Box>
                 <Box sx={{ flex: 1 }}>
                   <Field label="수신" value={event.toDisplay} mono />
                 </Box>
+                {onBlockSender && (
+                  <Button
+                    size="small"
+                    color={alreadyBlocked ? "inherit" : "error"}
+                    startIcon={<BlockIcon fontSize="small" />}
+                    onClick={() => onBlockSender(event.from)}
+                    disabled={alreadyBlocked}
+                    sx={{ flexShrink: 0, mb: 0.5 }}
+                  >
+                    {alreadyBlocked ? "차단됨" : "발신자 차단"}
+                  </Button>
+                )}
               </Stack>
               {event.origTo && (
                 <Field label="원본 수신(별칭)" value={event.origTo} mono />

@@ -14,6 +14,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import PrintIcon from "@mui/icons-material/Print";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import BlockIcon from "@mui/icons-material/Block";
 import { DataGrid } from "@mui/x-data-grid";
 import type { GridColDef, GridRowParams } from "@mui/x-data-grid";
 import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker";
@@ -41,6 +42,8 @@ interface Props {
   mode: "live" | "history";
   onSearch?: (query: string, range: DateRange) => void;
   onRefresh?: () => void;
+  onBlockSender?: (email: string) => void;
+  blockedEmails?: Set<string>;
   initialQuery?: string;
   initialRange?: DateRange;
   loading?: boolean;
@@ -61,6 +64,8 @@ export default function LogTable({
   mode,
   onSearch,
   onRefresh,
+  onBlockSender,
+  blockedEmails,
   initialQuery,
   initialRange,
   loading,
@@ -166,8 +171,39 @@ export default function LogTable({
       },
       { field: "fromIp", headerName: "발신자IP", width: 130, cellClassName: "mm-mono mm-dim" },
       { field: "toIp", headerName: "수신자IP", width: 130, cellClassName: "mm-mono mm-dim" },
+      ...(onBlockSender
+        ? [
+            {
+              field: "__block",
+              headerName: "",
+              width: 48,
+              sortable: false,
+              filterable: false,
+              disableColumnMenu: true,
+              renderCell: (p: { row: (typeof rows)[number] }) => {
+                const already = blockedEmails?.has(p.row.from);
+                return (
+                  <Tooltip title={already ? "이미 차단됨" : "발신자 차단"}>
+                    <span>
+                      <IconButton
+                        size="small"
+                        color={already ? "error" : "default"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onBlockSender(p.row.from);
+                        }}
+                      >
+                        <BlockIcon fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                );
+              },
+            } satisfies GridColDef<(typeof rows)[number]>,
+          ]
+        : []),
     ],
-    [],
+    [onBlockSender, blockedEmails],
   );
 
   function toggleType(type: string) {
@@ -360,7 +396,12 @@ export default function LogTable({
           }}
         />
       </Box>
-      <EventDetailDialog event={selected} onClose={() => setSelected(null)} />
+      <EventDetailDialog
+        event={selected}
+        onClose={() => setSelected(null)}
+        onBlockSender={onBlockSender}
+        alreadyBlocked={selected ? blockedEmails?.has(selected.from) : false}
+      />
     </Box>
   );
 }
