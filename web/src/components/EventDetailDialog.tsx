@@ -11,8 +11,39 @@ import Typography from "@mui/material/Typography";
 import CloseIcon from "@mui/icons-material/Close";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import CheckIcon from "@mui/icons-material/Check";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import type { WebEvent } from "../types";
 import { eventColors, monoFont } from "../theme";
+
+// navigator.clipboard requires a secure context (HTTPS, or localhost) — this
+// dashboard is commonly reached over plain HTTP on a LAN/internal IP, where
+// the API is simply absent or silently rejects. Fall back to the older
+// execCommand("copy") path (works over HTTP, deprecated but still supported)
+// so copying doesn't just fail quietly either way.
+async function copyToClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // fall through to the execCommand fallback below
+    }
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 function Field({ label, value, mono, color }: { label: string; value: string; mono?: boolean; color?: string }) {
   return (
@@ -30,18 +61,16 @@ function Field({ label, value, mono, color }: { label: string; value: string; mo
   );
 }
 
+type CopyState = "idle" | "copied" | "failed";
+
 export default function EventDetailDialog({ event, onClose }: { event: WebEvent | null; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<CopyState>("idle");
 
   async function copyRaw() {
     if (!event) return;
-    try {
-      await navigator.clipboard.writeText(event.raw);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard API unavailable — no-op, not worth surfacing an error for
-    }
+    const ok = await copyToClipboard(event.raw);
+    setCopyState(ok ? "copied" : "failed");
+    setTimeout(() => setCopyState("idle"), 1500);
   }
 
   return (
@@ -98,10 +127,19 @@ export default function EventDetailDialog({ event, onClose }: { event: WebEvent 
                   </Typography>
                   <Button
                     size="small"
-                    startIcon={copied ? <CheckIcon fontSize="small" /> : <ContentCopyIcon fontSize="small" />}
+                    color={copyState === "failed" ? "error" : "primary"}
+                    startIcon={
+                      copyState === "copied" ? (
+                        <CheckIcon fontSize="small" />
+                      ) : copyState === "failed" ? (
+                        <ErrorOutlineIcon fontSize="small" />
+                      ) : (
+                        <ContentCopyIcon fontSize="small" />
+                      )
+                    }
                     onClick={copyRaw}
                   >
-                    {copied ? "복사됨" : "복사"}
+                    {copyState === "copied" ? "복사됨" : copyState === "failed" ? "복사 실패" : "복사"}
                   </Button>
                 </Stack>
                 <Box
