@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -501,34 +500,54 @@ func startTail(ch chan<- string, errCh chan<- error) {
 
 const maxHistoryResults = 3000
 
-var rotatedSuffixRe = regexp.MustCompile(`\.(\d+)(\.gz)?$`)
-
 // listRotatedLogs returns logPath and any logrotate-style rotated
-// siblings (mail.log.1, mail.log.2.gz, ...), oldest first, current
-// logPath last — chronological order for search results.
+// siblings, oldest first, current logPath last — chronological order for
+// search results. Sorting by mtime (rather than parsing a numeric suffix
+// out of the filename) is what lets this handle every logrotate naming
+// scheme mail-monitor might run under without knowing which one in
+// advance: the traditional numeric suffix (mail.log.1, mail.log.2.gz) and
+// the "dateext" option many distros default to (mail.log-20260101.gz,
+// dash-separated, no numeric suffix at all).
 func listRotatedLogs() []string {
-	matches, _ := filepath.Glob(logPath + ".*")
-	type entry struct {
-		path string
-		n    int
+	dir := filepath.Dir(logPath)
+	base := filepath.Base(logPath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if _, statErr := os.Stat(logPath); statErr == nil {
+			return []string{logPath}
+		}
+		return nil
 	}
-	var entries []entry
-	for _, p := range matches {
-		m := rotatedSuffixRe.FindStringSubmatch(p)
-		if m == nil {
+
+	type rotated struct {
+		path    string
+		modTime time.Time
+	}
+	var siblings []rotated
+	for _, e := range entries {
+		name := e.Name()
+		if name == base {
+			continue // current log is appended separately, always last
+		}
+		// A rotated sibling's name always extends base with a "." or "-"
+		// separator (mail.log.1, mail.log-20260101.gz, ...) — this also
+		// excludes unrelated files that merely share the prefix, like
+		// mail.log.access if logPath were just "mail.log.access"'s prefix.
+		rest := strings.TrimPrefix(name, base)
+		if rest == name || rest == "" || (rest[0] != '.' && rest[0] != '-') {
 			continue
 		}
-		n, err := strconv.Atoi(m[1])
+		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		entries = append(entries, entry{p, n})
+		siblings = append(siblings, rotated{filepath.Join(dir, name), info.ModTime()})
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].n > entries[j].n })
+	sort.Slice(siblings, func(i, j int) bool { return siblings[i].modTime.Before(siblings[j].modTime) })
 
-	files := make([]string, 0, len(entries)+1)
-	for _, e := range entries {
-		files = append(files, e.path)
+	files := make([]string, 0, len(siblings)+1)
+	for _, s := range siblings {
+		files = append(files, s.path)
 	}
 	if _, err := os.Stat(logPath); err == nil {
 		files = append(files, logPath)
