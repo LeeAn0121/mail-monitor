@@ -9,7 +9,7 @@ import NavRail from "./components/NavRail";
 import type { View } from "./components/NavRail";
 import RankingList from "./components/RankingList";
 import StatusStrip from "./components/StatusStrip";
-import { eventColors, monoFont } from "./theme";
+import { accentSignal, eventColors, monoFont } from "./theme";
 import { useDashboard } from "./useDashboard";
 import { useHistorySearch } from "./useHistorySearch";
 import { useVersion } from "./useVersion";
@@ -32,8 +32,17 @@ export default function App() {
           sx={{ px: 2.5, py: 1.5, borderBottom: 1, borderColor: "divider" }}
         >
           <Stack direction="row" spacing={1} alignItems="baseline">
-            <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: "-0.01em" }}>
+            <Typography
+              variant="h6"
+              sx={{ fontFamily: monoFont, fontWeight: 700, letterSpacing: "-0.01em", color: "text.primary" }}
+            >
+              <Box component="span" sx={{ color: accentSignal }}>
+                ~/
+              </Box>
               mail-monitor
+              <Box component="span" className="mm-cursor" sx={{ color: accentSignal, ml: "1px" }}>
+                _
+              </Box>
             </Typography>
             {versionInfo && (
               <Link
@@ -56,17 +65,25 @@ export default function App() {
                 sx={{ bgcolor: "transparent", color: eventColors.BOUNCE, border: 1, borderColor: eventColors.BOUNCE, fontWeight: 700 }}
               />
             )}
-            <Chip
-              size="small"
-              label={connected ? "실시간 연결됨" : "연결 끊김"}
-              sx={{
-                bgcolor: "transparent",
-                border: 1,
-                borderColor: connected ? eventColors.RECV : "divider",
-                color: connected ? eventColors.RECV : "text.secondary",
-                fontWeight: 600,
-              }}
-            />
+            <Stack
+              direction="row"
+              spacing={1}
+              alignItems="center"
+              sx={{ border: 1, borderColor: connected ? accentSignal : "divider", px: 1.25, py: 0.5 }}
+            >
+              <Box
+                sx={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  bgcolor: connected ? accentSignal : "text.disabled",
+                  boxShadow: connected ? `0 0 6px ${accentSignal}` : "none",
+                }}
+              />
+              <Typography variant="caption" sx={{ fontWeight: 600, color: connected ? accentSignal : "text.secondary" }}>
+                {connected ? "실시간 연결됨" : "연결 끊김"}
+              </Typography>
+            </Stack>
           </Stack>
         </Stack>
 

@@ -18,6 +18,7 @@ import theme from "./theme";
 import App from "./App";
 import "./print.css";
 import "./scrollbar.css";
+import "./motion.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

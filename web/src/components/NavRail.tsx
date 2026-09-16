@@ -1,16 +1,17 @@
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
-import ActivityIcon from "@mui/icons-material/GraphicEq";
-import HistoryIcon from "@mui/icons-material/ManageSearch";
-import RankingIcon from "@mui/icons-material/Leaderboard";
+import { accentSignal, monoFont } from "../theme";
 
 export type View = "live" | "ranking" | "history";
 
-const ITEMS: { id: View; label: string; icon: React.ReactNode }[] = [
-  { id: "live", label: "실시간", icon: <ActivityIcon fontSize="small" /> },
-  { id: "ranking", label: "발신/수신 랭킹", icon: <RankingIcon fontSize="small" /> },
-  { id: "history", label: "이력 검색", icon: <HistoryIcon fontSize="small" /> },
+// Monospace glyphs instead of stock Material icons — rhymes with the TUI's
+// own glyph system (●▼▲↪✕■ for event types) rather than reaching for a
+// generic icon set, so the web dashboard reads as the same tool.
+const ITEMS: { id: View; label: string; glyph: string }[] = [
+  { id: "live", label: "실시간", glyph: "▸" },
+  { id: "ranking", label: "발신/수신 랭킹", glyph: "▦" },
+  { id: "history", label: "이력 검색", glyph: "⌕" },
 ];
 
 export default function NavRail({
@@ -24,17 +25,46 @@ export default function NavRail({
     <Box
       component="nav"
       sx={{
-        width: 64,
+        width: 56,
         flexShrink: 0,
         borderRight: 1,
         borderColor: "divider",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        pt: 2,
       }}
     >
-      <Stack spacing={0.5} alignItems="center">
+      <Box
+        sx={{
+          width: "100%",
+          height: 52,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderBottom: 1,
+          borderColor: "divider",
+        }}
+      >
+        <Box
+          sx={{
+            width: 26,
+            height: 26,
+            border: 1,
+            borderColor: accentSignal,
+            color: accentSignal,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: monoFont,
+            fontSize: 14,
+            fontWeight: 700,
+          }}
+        >
+          &gt;
+        </Box>
+      </Box>
+
+      <Stack spacing={0.5} alignItems="center" sx={{ pt: 1.5 }}>
         {ITEMS.map((item) => {
           const active = item.id === view;
           return (
@@ -45,22 +75,25 @@ export default function NavRail({
                 aria-label={item.label}
                 aria-current={active}
                 sx={{
-                  width: 44,
-                  height: 44,
+                  width: 40,
+                  height: 40,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   border: "none",
                   cursor: "pointer",
                   bgcolor: active ? "action.selected" : "transparent",
-                  color: active ? "primary.main" : "text.secondary",
+                  color: active ? accentSignal : "text.secondary",
                   borderLeft: 2,
-                  borderLeftColor: active ? "primary.main" : "transparent",
+                  borderLeftColor: active ? accentSignal : "transparent",
+                  fontFamily: monoFont,
+                  fontSize: 18,
+                  transition: "color .12s, background-color .12s",
                   "&:hover": { bgcolor: "action.hover", color: "text.primary" },
-                  "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main" },
+                  "&:focus-visible": { outline: "2px solid", outlineColor: accentSignal },
                 }}
               >
-                {item.icon}
+                {item.glyph}
               </Box>
             </Tooltip>
           );

@@ -1,0 +1,16 @@
+/* The one deliberate motion moment in the whole app — a terminal cursor
+   blinking after the product name, echoing the TUI it sits beside. */
+@keyframes mm-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+.mm-cursor {
+  animation: mm-blink 1s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mm-cursor {
+    animation: none;
+  }
+}
