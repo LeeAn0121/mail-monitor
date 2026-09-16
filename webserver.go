@@ -23,6 +23,11 @@ const webDefaultAddr = ":18080"
 // mail arrives.
 const webSnapshotEvents = 300
 
+// webRankingLimit caps sender/receiver ranking entries sent to the
+// dashboard — generous since the panel scrolls internally now, rather than
+// the old top-10 cutoff that existed only because the panel couldn't scroll.
+const webRankingLimit = 50
+
 //go:embed web/dist
 var webDistFS embed.FS
 
@@ -121,8 +126,8 @@ func (s *webState) snapshot() snapshotPayload {
 	return snapshotPayload{
 		Events:          events,
 		Counts:          counts,
-		SenderRanking:   toRankPayload(firstN(rankSenders(s.events), 10)),
-		ReceiverRanking: toRankPayload(firstN(rankReceivers(s.events), 10)),
+		SenderRanking:   toRankPayload(firstN(rankSenders(s.events), webRankingLimit)),
+		ReceiverRanking: toRankPayload(firstN(rankReceivers(s.events), webRankingLimit)),
 		AlertActive:     time.Now().Before(s.alertUntil),
 	}
 }

@@ -71,9 +71,14 @@ export default function LogTable({ title, events, mode, onSearch, loading, empty
         justifyContent="space-between"
         sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: "divider" }}
       >
-        <Typography variant="subtitle2" sx={{ fontWeight: 700, flexShrink: 0 }}>
-          {title}
-        </Typography>
+        <Stack direction="row" spacing={1} alignItems="baseline" flexShrink={0}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+            {title}
+          </Typography>
+          <Typography variant="caption" sx={{ color: "text.disabled", fontFamily: monoFont }}>
+            {filtered.length.toLocaleString()}건
+          </Typography>
+        </Stack>
 
         <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
           <Box component="form" onSubmit={submitSearch}>
@@ -178,7 +183,7 @@ export default function LogTable({ title, events, mode, onSearch, loading, empty
         ))}
       </Box>
 
-      <Box sx={{ overflowY: "auto", flex: 1, minHeight: 0 }} className="log-scroll">
+      <Box sx={{ overflowY: "auto", flex: 1, minHeight: 0 }} className="log-scroll thin-scroll">
         {filtered.length === 0 ? (
           <Typography variant="body2" color="text.disabled" sx={{ p: 3, textAlign: "center" }}>
             {emptyHint}
@@ -195,6 +200,7 @@ export default function LogTable({ title, events, mode, onSearch, loading, empty
                 borderBottom: 1,
                 borderColor: "divider",
                 alignItems: "start",
+                transition: "background-color .12s",
                 "&:hover": { bgcolor: "action.hover" },
               }}
             >

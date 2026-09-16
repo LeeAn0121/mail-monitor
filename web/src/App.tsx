@@ -67,7 +67,7 @@ export default function App() {
                     filename="mail-monitor_live"
                   />
                 </Box>
-                <Stack sx={{ flex: 1, minWidth: 260 }} spacing={2}>
+                <Stack sx={{ flex: 1, minWidth: 260, minHeight: 0 }} spacing={2}>
                   <RankingList title="발신 랭킹" entries={senderRanking} color={eventColors.SENT} />
                   <RankingList title="수신 랭킹" entries={receiverRanking} color={eventColors.RECV} />
                 </Stack>

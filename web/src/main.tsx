@@ -14,6 +14,7 @@ import "@fontsource/jetbrains-mono/500.css";
 import theme from "./theme";
 import App from "./App";
 import "./print.css";
+import "./scrollbar.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
