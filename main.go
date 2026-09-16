@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/NimbleMarkets/ntcharts/barchart"
 	"github.com/NimbleMarkets/ntcharts/sparkline"
@@ -261,12 +263,59 @@ var mimeWordDecoder = &mime.WordDecoder{
 // concatenated per spec, same as the original unfolded header intended.
 var foldArtifactRe = regexp.MustCompile(`\?=\?+\s*=\?`)
 
+// truncatedEncodedWordRe matches a base64 RFC 2047 encoded-word regardless
+// of whether it's properly closed with "?=" — postfix's syslog line-length
+// limit sometimes cuts a long Subject header off mid-base64 before it gets
+// there, which is exactly the case decodePartialEncodedWord exists to
+// salvage: a message that std mime.WordDecoder rejects outright as
+// malformed, but whose readable prefix we can still recover.
+var truncatedEncodedWordRe = regexp.MustCompile(`=\?([^?]+)\?[Bb]\?([A-Za-z0-9+/]+)=*(?:\?=)?`)
+
+// decodePartialEncodedWord recovers as much of a truncated base64
+// encoded-word as decodes cleanly: it drops any trailing base64 group that
+// isn't a full 4 characters (undecodable without the missing bytes) and any
+// trailing incomplete UTF-8 sequence in the decoded output (cut off
+// mid-character for the same reason), then reports the result truncated
+// with "…" so it reads as partial rather than as the complete subject.
+func decodePartialEncodedWord(s string) (string, bool) {
+	m := truncatedEncodedWordRe.FindStringSubmatch(s)
+	if m == nil {
+		return "", false
+	}
+	charset, data := m[1], m[2]
+	data = data[:len(data)-len(data)%4]
+	if data == "" {
+		return "", false
+	}
+	raw, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		return "", false
+	}
+	enc, err := htmlindex.Get(charset)
+	if err == nil && enc != nil {
+		if decoded, derr := enc.NewDecoder().Bytes(raw); derr == nil {
+			raw = decoded
+		}
+	}
+	text := string(raw)
+	for len(text) > 0 && !utf8.ValidString(text) {
+		text = text[:len(text)-1]
+	}
+	if text == "" {
+		return "", false
+	}
+	return text + "…", true
+}
+
 // decodeSubject best-effort decodes a raw header value; on any failure it
 // falls back to the original (still-encoded) text rather than dropping it.
 func decodeSubject(s string) string {
 	s = foldArtifactRe.ReplaceAllString(s, "?= =?")
 	if decoded, err := mimeWordDecoder.DecodeHeader(s); err == nil {
 		return decoded
+	}
+	if partial, ok := decodePartialEncodedWord(s); ok {
+		return partial
 	}
 	return s
 }
