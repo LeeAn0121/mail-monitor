@@ -162,6 +162,7 @@ var (
 	relayRe        = regexp.MustCompile(`relay=([^,\s]*)`)
 	rejectRe       = regexp.MustCompile(`reject:\s*([^;]*)`)
 	bounceReasonRe = regexp.MustCompile(`status=bounced \((.*)\)`)
+	sentDetailRe   = regexp.MustCompile(`status=sent \((.*)\)`)
 	clientRe       = regexp.MustCompile(`client=\S+\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
 	bracketIP      = regexp.MustCompile(`\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]`)
 	subjectRe      = regexp.MustCompile(`warning: header Subject: (.*?) from \S+\[[0-9.]+\];`)
@@ -324,23 +325,33 @@ func (m *model) processLine(line string) *Event {
 				withDetail(subject, reason, m.qidIP[qid], "", "")
 		case strings.Contains(rest, "status=sent"):
 			relay := extract(relayRe, rest)
+			detail := extract(sentDetailRe, rest)
 			if isLocalRelay(relay) {
 				typ := EventRecv
 				result := "수신 완료"
+				if detail != "-" {
+					result = detail
+				}
 				evOrigTo := ""
 				if forwarded {
 					typ = EventForward
-					result = "전달 완료"
+					if detail == "-" {
+						result = "전달 완료"
+					}
 					evOrigTo = origTo
 				}
 				return newEvent(when, typ, line, from, toRaw,
 					withSubject(fmt.Sprintf("발신: %s → 수신: %s", fromDisplay, to), subject)).
 					withDetail(subject, result, m.qidIP[qid], "", evOrigTo)
 			}
+			result := "발송 완료"
+			if detail != "-" {
+				result = detail
+			}
 			relayIP := extract(bracketIP, relay)
 			return newEvent(when, EventSent, line, from, toRaw,
 				withSubject(fmt.Sprintf("발신: %s → 수신: %s (via %s)", fromDisplay, to, relay), subject)).
-				withDetail(subject, "발송 완료", m.qidIP[qid], relayIP, "")
+				withDetail(subject, result, m.qidIP[qid], relayIP, "")
 		}
 		return nil
 	}

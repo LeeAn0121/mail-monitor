@@ -15,12 +15,13 @@ import FileDownloadIcon from "@mui/icons-material/FileDownload";
 import PrintIcon from "@mui/icons-material/Print";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { DataGrid } from "@mui/x-data-grid";
-import type { GridColDef } from "@mui/x-data-grid";
+import type { GridColDef, GridRowParams } from "@mui/x-data-grid";
 import { EVENT_TYPES } from "../types";
 import type { WebEvent } from "../types";
 import { eventColors, monoFont } from "../theme";
 import { exportCSV, exportXLSX } from "../export";
 import { loadWithTTL, saveWithTTL } from "../persist";
+import EventDetailDialog from "./EventDetailDialog";
 
 const LIVE_FILTER_KEY = "mm.liveFilter";
 
@@ -70,6 +71,7 @@ export default function LogTable({
     return saved && saved.length > 0 ? new Set(saved) : new Set(EVENT_TYPES);
   });
   const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
+  const [selected, setSelected] = useState<WebEvent | null>(null);
 
   useEffect(() => {
     if (mode !== "live") return;
@@ -290,6 +292,7 @@ export default function LogTable({
           getRowHeight={() => "auto"}
           disableRowSelectionOnClick
           hideFooterSelectedRowCount
+          onRowClick={(p: GridRowParams<(typeof rows)[number]>) => setSelected(p.row)}
           localeText={{ noRowsLabel: emptyHint }}
           pageSizeOptions={[25, 50, 100]}
           initialState={{ pagination: { paginationModel: { pageSize: 50, page: 0 } } }}
@@ -307,12 +310,14 @@ export default function LogTable({
             "& .MuiDataGrid-cell": { borderColor: "divider", alignItems: "flex-start" },
             "& .MuiDataGrid-cell.mm-mono": { fontFamily: monoFont, fontSize: 12.5 },
             "& .MuiDataGrid-cell.mm-dim": { color: "text.secondary" },
+            "& .MuiDataGrid-row": { cursor: "pointer" },
             "& .MuiDataGrid-row:hover": { bgcolor: "action.hover" },
             "& .MuiDataGrid-footerContainer": { borderColor: "divider" },
             "& .MuiDataGrid-virtualScroller": { minHeight: 80 },
           }}
         />
       </Box>
+      <EventDetailDialog event={selected} onClose={() => setSelected(null)} />
     </Box>
   );
 }

@@ -9,6 +9,7 @@ export interface WebEvent {
   result: string;
   fromIp: string;
   toIp: string;
+  raw: string;
 }
 
 export interface RankEntry {

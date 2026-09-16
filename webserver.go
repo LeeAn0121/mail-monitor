@@ -45,6 +45,7 @@ type webEvent struct {
 	Result  string `json:"result"`
 	FromIP  string `json:"fromIp"`
 	ToIP    string `json:"toIp"`
+	Raw     string `json:"raw"`
 }
 
 func toWebEvent(ev Event) webEvent {
@@ -59,6 +60,7 @@ func toWebEvent(ev Event) webEvent {
 		Result:  ev.Result,
 		FromIP:  ev.FromIP,
 		ToIP:    ev.ToIP,
+		Raw:     ev.Raw,
 	}
 }
 
