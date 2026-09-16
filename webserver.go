@@ -15,7 +15,7 @@ import (
 // webAddrEnvVar overrides the address the dashboard listens on
 // (default webDefaultAddr). Set to "off" to disable the web server entirely.
 const webAddrEnvVar = "MAIL_MONITOR_WEB_ADDR"
-const webDefaultAddr = ":10080"
+const webDefaultAddr = ":18080"
 
 // webSnapshotEvents caps how many recent events the /api/snapshot response
 // carries — the SSE stream keeps the live feed current after that, so this
