@@ -54,12 +54,21 @@ export default function App() {
           direction="row"
           alignItems="center"
           justifyContent="space-between"
-          sx={{ px: 2.5, py: 1.5, borderBottom: 1, borderColor: "divider" }}
+          flexWrap="wrap"
+          rowGap={1}
+          columnGap={1.5}
+          sx={{ px: { xs: 1.5, sm: 2.5 }, py: 1.25, borderBottom: 1, borderColor: "divider" }}
         >
           <Stack direction="row" spacing={1} alignItems="baseline">
             <Typography
               variant="h6"
-              sx={{ fontFamily: monoFont, fontWeight: 700, letterSpacing: "-0.01em", color: "text.primary" }}
+              sx={{
+                fontFamily: monoFont,
+                fontWeight: 700,
+                letterSpacing: "-0.01em",
+                color: "text.primary",
+                fontSize: { xs: 16, sm: 20 },
+              }}
             >
               <Box component="span" sx={{ color: accentSignal }}>
                 ~/
@@ -76,18 +85,27 @@ export default function App() {
                 rel="noopener noreferrer"
                 underline="hover"
                 variant="caption"
-                sx={{ fontFamily: monoFont, color: "text.disabled" }}
+                sx={{ fontFamily: monoFont, color: "text.disabled", display: { xs: "none", sm: "inline" } }}
               >
                 v{versionInfo.version}
               </Link>
             )}
           </Stack>
-          <Stack direction="row" spacing={1.5} alignItems="center">
+          <Stack direction="row" spacing={1.25} alignItems="center" flexWrap="wrap" rowGap={1}>
             <RefreshIntervalPicker value={intervalMs} onChange={setIntervalMs} />
             {alertActive && (
               <Chip
                 size="small"
-                label="BOUNCE/REJECT 급증"
+                label={
+                  <>
+                    <Box component="span" sx={{ display: { xs: "inline", sm: "none" } }}>
+                      급증
+                    </Box>
+                    <Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>
+                      BOUNCE/REJECT 급증
+                    </Box>
+                  </>
+                }
                 sx={{ bgcolor: "transparent", color: eventColors.BOUNCE, border: 1, borderColor: eventColors.BOUNCE, fontWeight: 700 }}
               />
             )}
@@ -102,18 +120,26 @@ export default function App() {
                   width: 7,
                   height: 7,
                   borderRadius: "50%",
+                  flexShrink: 0,
                   bgcolor: connected ? accentSignal : "text.disabled",
                   boxShadow: connected ? `0 0 6px ${accentSignal}` : "none",
                 }}
               />
-              <Typography variant="caption" sx={{ fontWeight: 600, color: connected ? accentSignal : "text.secondary" }}>
+              <Typography
+                variant="caption"
+                sx={{
+                  fontWeight: 600,
+                  color: connected ? accentSignal : "text.secondary",
+                  display: { xs: "none", sm: "inline" },
+                }}
+              >
                 {connected ? "실시간 연결됨" : "연결 끊김"}
               </Typography>
             </Stack>
           </Stack>
         </Stack>
 
-        <Box sx={{ p: 2.5, display: "flex", flexDirection: "column", gap: 2, minHeight: 0, flex: 1 }}>
+        <Box sx={{ p: { xs: 1.25, sm: 2.5 }, display: "flex", flexDirection: "column", gap: { xs: 1.25, sm: 2 }, minHeight: 0, flex: 1 }}>
           {view === "live" && (
             <>
               <StatusStrip counts={counts} />

@@ -76,8 +76,8 @@ export default function NavRail({
                 aria-label={item.label}
                 aria-current={active}
                 sx={{
-                  width: 40,
-                  height: 40,
+                  width: { xs: 44, sm: 40 },
+                  height: { xs: 44, sm: 40 },
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",

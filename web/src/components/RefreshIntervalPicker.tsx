@@ -21,7 +21,10 @@ export default function RefreshIntervalPicker({
   return (
     <Stack direction="row" spacing={0.75} alignItems="center">
       <UpdateIcon fontSize="small" sx={{ color: "text.disabled" }} />
-      <Typography variant="caption" sx={{ color: "text.disabled", flexShrink: 0 }}>
+      <Typography
+        variant="caption"
+        sx={{ color: "text.disabled", flexShrink: 0, display: { xs: "none", sm: "inline" } }}
+      >
         새로고침
       </Typography>
       <Select

@@ -8,6 +8,8 @@ import Divider from "@mui/material/Divider";
 import IconButton from "@mui/material/IconButton";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
 import CloseIcon from "@mui/icons-material/Close";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import CheckIcon from "@mui/icons-material/Check";
@@ -76,6 +78,8 @@ export default function EventDetailDialog({
   alreadyBlocked?: boolean;
 }) {
   const [copyState, setCopyState] = useState<CopyState>("idle");
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
   async function copyRaw() {
     if (!event) return;
@@ -85,7 +89,7 @@ export default function EventDetailDialog({
   }
 
   return (
-    <Dialog open={!!event} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={!!event} onClose={onClose} maxWidth="sm" fullWidth fullScreen={fullScreen}>
       {event && (
         <>
           <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -103,7 +107,7 @@ export default function EventDetailDialog({
           </DialogTitle>
           <DialogContent dividers>
             <Stack spacing={2}>
-              <Stack direction="row" spacing={3} alignItems="flex-end">
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={{ xs: 1.5, sm: 3 }} alignItems={{ sm: "flex-end" }}>
                 <Box sx={{ flex: 1 }}>
                   <Field label="발신" value={event.fromDisplay} mono />
                 </Box>
@@ -117,7 +121,7 @@ export default function EventDetailDialog({
                     startIcon={<BlockIcon fontSize="small" />}
                     onClick={() => onBlockSender(event.from)}
                     disabled={alreadyBlocked}
-                    sx={{ flexShrink: 0, mb: 0.5 }}
+                    sx={{ flexShrink: 0, mb: { sm: 0.5 }, width: { xs: "100%", sm: "auto" } }}
                   >
                     {alreadyBlocked ? "차단됨" : "발신자 차단"}
                   </Button>

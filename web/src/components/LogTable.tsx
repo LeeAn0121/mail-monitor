@@ -251,14 +251,22 @@ export default function LogTable({
           </Typography>
         </Stack>
 
-        <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Box component="form" onSubmit={submitSearch}>
+        <Stack
+          direction="row"
+          spacing={1.5}
+          alignItems="center"
+          flexWrap="wrap"
+          useFlexGap
+          sx={{ width: { xs: "100%", md: "auto" } }}
+        >
+          <Box component="form" onSubmit={submitSearch} sx={{ width: { xs: "100%", sm: "auto" } }}>
             <TextField
               size="small"
+              fullWidth
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={mode === "history" ? "user@domain.com / IP / 제목 키워드" : "발신·수신·제목·처리결과 검색"}
-              sx={{ width: 260 }}
+              sx={{ width: { xs: "100%", sm: 260 } }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -277,7 +285,7 @@ export default function LogTable({
                 onChange={setFromDate}
                 ampm={false}
                 format="YYYY-MM-DD HH:mm"
-                slotProps={{ textField: { size: "small", sx: { width: 190 } } }}
+                slotProps={{ textField: { size: "small", fullWidth: true, sx: { width: { xs: "100%", sm: 190 } } } }}
               />
               <DateTimePicker
                 label="종료"
@@ -286,16 +294,25 @@ export default function LogTable({
                 ampm={false}
                 format="YYYY-MM-DD HH:mm"
                 minDateTime={fromDate ?? undefined}
-                slotProps={{ textField: { size: "small", sx: { width: 190 } } }}
+                slotProps={{ textField: { size: "small", fullWidth: true, sx: { width: { xs: "100%", sm: 190 } } } }}
               />
-              {(fromDate || toDate) && (
-                <Button size="small" onClick={clearRange}>
-                  기간 초기화
+              <Stack direction="row" spacing={1} sx={{ width: { xs: "100%", sm: "auto" } }}>
+                {(fromDate || toDate) && (
+                  <Button size="small" onClick={clearRange}>
+                    기간 초기화
+                  </Button>
+                )}
+                <Button
+                  type="submit"
+                  onClick={submitSearch}
+                  size="small"
+                  variant="outlined"
+                  disabled={loading}
+                  sx={{ flex: { xs: 1, sm: "initial" } }}
+                >
+                  {loading ? "검색 중..." : "검색"}
                 </Button>
-              )}
-              <Button type="submit" onClick={submitSearch} size="small" variant="outlined" disabled={loading}>
-                {loading ? "검색 중..." : "검색"}
-              </Button>
+              </Stack>
             </>
           )}
 

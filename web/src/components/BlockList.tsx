@@ -50,13 +50,20 @@ export default function BlockList({ blocklist }: { blocklist: ReturnType<typeof 
           </Typography>
         </Stack>
 
-        <Stack component="form" onSubmit={submit} direction="row" spacing={1}>
+        <Stack
+          component="form"
+          onSubmit={submit}
+          direction={{ xs: "column", sm: "row" }}
+          spacing={1}
+          sx={{ width: { xs: "100%", sm: "auto" } }}
+        >
           <TextField
             size="small"
+            fullWidth
             placeholder="차단할 이메일 주소"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            sx={{ width: 260 }}
+            sx={{ width: { xs: "100%", sm: 260 } }}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
@@ -65,14 +72,22 @@ export default function BlockList({ blocklist }: { blocklist: ReturnType<typeof 
               ),
             }}
           />
-          <Button type="submit" size="small" variant="outlined" disabled={pending || !email.trim()}>
-            차단
-          </Button>
-          <Tooltip title="새로고침">
-            <IconButton size="small" onClick={refresh}>
-              <RefreshIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+          <Stack direction="row" spacing={1}>
+            <Button
+              type="submit"
+              size="small"
+              variant="outlined"
+              disabled={pending || !email.trim()}
+              sx={{ flex: { xs: 1, sm: "initial" } }}
+            >
+              차단
+            </Button>
+            <Tooltip title="새로고침">
+              <IconButton size="small" onClick={refresh}>
+                <RefreshIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Stack>
         </Stack>
       </Stack>
 
