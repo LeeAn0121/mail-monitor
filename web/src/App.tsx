@@ -8,6 +8,7 @@ import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import BlockList from "./components/BlockList";
 import UserDirectory from "./components/UserDirectory";
+import ForwardingList from "./components/ForwardingList";
 import LogTable from "./components/LogTable";
 import NavRail from "./components/NavRail";
 import type { View } from "./components/NavRail";
@@ -202,6 +203,12 @@ export default function App() {
           {view === "users" && (
             <Box sx={{ display: "flex", flex: 1, minHeight: 0 }}>
               <UserDirectory />
+            </Box>
+          )}
+
+          {view === "forwarding" && (
+            <Box sx={{ display: "flex", flex: 1, minHeight: 0 }}>
+              <ForwardingList />
             </Box>
           )}
         </Box>

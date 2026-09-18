@@ -312,6 +312,54 @@ func startWebServer(addr string, state *webState, hub *sseHub, db *sql.DB) {
 		json.NewEncoder(w).Encode(map[string]any{"users": users, "enabled": db != nil})
 	})
 
+	// /api/forwardings manages the `forwardings` table (source, destination
+	// columns), joined against `users` for display names on either side.
+	mux.HandleFunc("/api/forwardings", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			list, err := listForwardings(db)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"forwardings": list, "enabled": db != nil})
+
+		case http.MethodPost:
+			var body struct {
+				Source      string `json:"source"`
+				Destination string `json:"destination"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "잘못된 요청입니다"})
+				return
+			}
+			already, err := addForwarding(db, strings.TrimSpace(body.Source), strings.TrimSpace(body.Destination))
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"alreadyExists": already})
+
+		case http.MethodDelete:
+			source := strings.TrimSpace(r.URL.Query().Get("source"))
+			destination := strings.TrimSpace(r.URL.Query().Get("destination"))
+			found, err := deleteForwarding(db, source, destination)
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"found": found})
+
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+
 	// /api/blocklist manages /etc/postfix/header_checks REJECT rules — the
 	// same file and line format /usr/local/bin/block-sender uses, so either
 	// one sees what the other added.

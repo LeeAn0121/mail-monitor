@@ -40,6 +40,13 @@ export interface DirectoryUser {
   name: string;
 }
 
+export interface ForwardingEntry {
+  source: string;
+  destination: string;
+  sourceName: string;
+  destinationName: string;
+}
+
 export interface BlockedSender {
   email: string;
   addedAt: string;

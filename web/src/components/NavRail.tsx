@@ -3,7 +3,7 @@ import Stack from "@mui/material/Stack";
 import Tooltip from "@mui/material/Tooltip";
 import { accentSignal, monoFont } from "../theme";
 
-export type View = "live" | "ranking" | "history" | "block" | "users";
+export type View = "live" | "ranking" | "history" | "block" | "users" | "forwarding";
 
 // Monospace glyphs instead of stock Material icons — rhymes with the TUI's
 // own glyph system (●▼▲↪✕■ for event types) rather than reaching for a
@@ -14,6 +14,7 @@ const ITEMS: { id: View; label: string; glyph: string }[] = [
   { id: "history", label: "이력 검색", glyph: "⌕" },
   { id: "block", label: "발신자 차단", glyph: "⊘" },
   { id: "users", label: "사용자 계정", glyph: "@" },
+  { id: "forwarding", label: "포워딩 관리", glyph: "↪" },
 ];
 
 export default function NavRail({
