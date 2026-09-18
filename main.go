@@ -871,10 +871,13 @@ func (m *model) nameSuffix(email string) string {
 
 // directoryUser is one row of the `users` table, for the web dashboard's
 // "사용자 계정" browser — a read-only view onto the same table/columns
-// resolveName already queries for name lookups.
+// resolveName already queries for name lookups. Password is the table's
+// raw (plaintext) value — the frontend is responsible for masking it by
+// default and only revealing one row at a time on request.
 type directoryUser struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Name     string `json:"name"`
 }
 
 // listUsers returns every row of the `users` table, sorted by name — used
@@ -887,7 +890,7 @@ func listUsers(db *sql.DB) ([]directoryUser, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	rows, err := db.QueryContext(ctx, "SELECT email, name FROM users ORDER BY name, email")
+	rows, err := db.QueryContext(ctx, "SELECT email, password, name FROM users ORDER BY name, email")
 	if err != nil {
 		return nil, err
 	}
@@ -896,7 +899,7 @@ func listUsers(db *sql.DB) ([]directoryUser, error) {
 	users := []directoryUser{}
 	for rows.Next() {
 		var u directoryUser
-		if err := rows.Scan(&u.Email, &u.Name); err != nil {
+		if err := rows.Scan(&u.Email, &u.Password, &u.Name); err != nil {
 			return nil, err
 		}
 		users = append(users, u)

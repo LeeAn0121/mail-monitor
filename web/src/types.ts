@@ -36,6 +36,7 @@ export interface VersionInfo {
 
 export interface DirectoryUser {
   email: string;
+  password: string;
   name: string;
 }
 
