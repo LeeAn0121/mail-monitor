@@ -83,6 +83,54 @@ func addForwarding(db *sql.DB, source, destination string) (alreadyExists bool, 
 	return false, err
 }
 
+// updateForwarding changes an existing (oldSource, oldDestination) pair to
+// (newSource, newDestination) — a forwarding row has no other identity to
+// key an update on, so this is how "edit" works for it. Returns
+// found=false if the old pair didn't exist, and rejects the change (rather
+// than silently merging two rows) if the new pair already exists as a
+// separate entry.
+func updateForwarding(db *sql.DB, oldSource, oldDestination, newSource, newDestination string) (found bool, err error) {
+	if db == nil {
+		return false, errDirectoryDisabled
+	}
+	if !emailPatternRe.MatchString(newSource) {
+		return false, fmt.Errorf("발신(source) 주소 형식이 올바르지 않습니다: %s", newSource)
+	}
+	if !emailPatternRe.MatchString(newDestination) {
+		return false, fmt.Errorf("수신(destination) 주소 형식이 올바르지 않습니다: %s", newDestination)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var count int
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM forwardings WHERE source = ? AND destination = ?", oldSource, oldDestination,
+	).Scan(&count); err != nil {
+		return false, err
+	}
+	if count == 0 {
+		return false, nil
+	}
+
+	if newSource != oldSource || newDestination != oldDestination {
+		var dupCount int
+		if err := db.QueryRowContext(ctx,
+			"SELECT COUNT(*) FROM forwardings WHERE source = ? AND destination = ?", newSource, newDestination,
+		).Scan(&dupCount); err != nil {
+			return false, err
+		}
+		if dupCount > 0 {
+			return false, fmt.Errorf("이미 존재하는 포워딩입니다: %s → %s", newSource, newDestination)
+		}
+	}
+
+	_, err = db.ExecContext(ctx,
+		"UPDATE forwardings SET source = ?, destination = ? WHERE source = ? AND destination = ?",
+		newSource, newDestination, oldSource, oldDestination)
+	return true, err
+}
+
 // deleteForwarding removes one exact (source, destination) pair. Returns
 // found=false if no such row existed.
 func deleteForwarding(db *sql.DB, source, destination string) (found bool, err error) {

@@ -50,6 +50,30 @@ export function useForwardings() {
     }
   }
 
+  async function update(
+    oldSource: string,
+    oldDestination: string,
+    source: string,
+    destination: string,
+  ): Promise<string | null> {
+    setPending(true);
+    try {
+      const res = await fetch("/api/forwardings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ oldSource, oldDestination, source, destination }),
+      });
+      const data = await res.json();
+      if (data.error) return data.error as string;
+      await refresh();
+      return null;
+    } catch {
+      return "포워딩 수정 요청에 실패했습니다.";
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function remove(source: string, destination: string): Promise<string | null> {
     setPending(true);
     try {
@@ -66,5 +90,5 @@ export function useForwardings() {
     }
   }
 
-  return { forwardings, enabled, loading, error, pending, add, remove, refresh };
+  return { forwardings, enabled, loading, error, pending, add, update, remove, refresh };
 }

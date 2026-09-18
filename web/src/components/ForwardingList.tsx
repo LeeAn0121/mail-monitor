@@ -8,12 +8,16 @@ import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import AddIcon from "@mui/icons-material/Add";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
+import EditIcon from "@mui/icons-material/Edit";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import SearchIcon from "@mui/icons-material/Search";
 import { monoFont } from "../theme";
 import { useForwardings } from "../useForwardings";
+import ForwardingFormDialog from "./ForwardingFormDialog";
+import type { ForwardingEntry } from "../types";
 
 function AddressLabel({ email, name }: { email: string; name: string }) {
   return (
@@ -31,11 +35,10 @@ function AddressLabel({ email, name }: { email: string; name: string }) {
 }
 
 export default function ForwardingList() {
-  const { forwardings, enabled, loading, error, pending, add, remove, refresh } = useForwardings();
+  const { forwardings, enabled, loading, error, add, update, remove, refresh } = useForwardings();
   const [query, setQuery] = useState("");
-  const [source, setSource] = useState("");
-  const [destination, setDestination] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<ForwardingEntry | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -49,27 +52,27 @@ export default function ForwardingList() {
     );
   }, [forwardings, query]);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const s = source.trim();
-    const d = destination.trim();
-    if (!s || !d) return;
-    const err = await add(s, d);
-    if (err) {
-      setFormError(err);
-    } else {
-      setFormError(null);
-      setSource("");
-      setDestination("");
-    }
+  function openAdd() {
+    setEditing(null);
+    setDialogOpen(true);
+  }
+
+  function openEdit(f: ForwardingEntry) {
+    setEditing(f);
+    setDialogOpen(true);
+  }
+
+  async function handleDelete(f: ForwardingEntry) {
+    if (!window.confirm(`이 포워딩을 삭제할까요?\n${f.source} → ${f.destination}`)) return;
+    await remove(f.source, f.destination);
   }
 
   return (
     <Box sx={{ border: 1, borderColor: "divider", display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
       <Stack
-        direction={{ xs: "column", md: "row" }}
+        direction={{ xs: "column", sm: "row" }}
         spacing={1.5}
-        alignItems={{ md: "center" }}
+        alignItems={{ sm: "center" }}
         justifyContent="space-between"
         sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: "divider" }}
       >
@@ -82,9 +85,10 @@ export default function ForwardingList() {
           </Typography>
         </Stack>
 
-        <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
+        <Stack direction="row" spacing={1} sx={{ width: { xs: "100%", sm: "auto" } }}>
           <TextField
             size="small"
+            fullWidth
             placeholder="검색"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -102,48 +106,15 @@ export default function ForwardingList() {
               <RefreshIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          <Button size="small" variant="outlined" startIcon={<AddIcon fontSize="small" />} onClick={openAdd}>
+            추가
+          </Button>
         </Stack>
       </Stack>
 
-      <Stack
-        component="form"
-        onSubmit={submit}
-        direction={{ xs: "column", sm: "row" }}
-        spacing={1}
-        alignItems={{ sm: "center" }}
-        sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: "divider" }}
-      >
-        <TextField
-          size="small"
-          fullWidth
-          placeholder="원본 주소 (source)"
-          value={source}
-          onChange={(e) => setSource(e.target.value)}
-          sx={{ width: { xs: "100%", sm: 240 } }}
-        />
-        <ArrowForwardIcon fontSize="small" sx={{ color: "text.disabled", display: { xs: "none", sm: "block" } }} />
-        <TextField
-          size="small"
-          fullWidth
-          placeholder="전달 주소 (destination)"
-          value={destination}
-          onChange={(e) => setDestination(e.target.value)}
-          sx={{ width: { xs: "100%", sm: 240 } }}
-        />
-        <Button
-          type="submit"
-          size="small"
-          variant="outlined"
-          disabled={pending || !source.trim() || !destination.trim()}
-          sx={{ flexShrink: 0, width: { xs: "100%", sm: "auto" } }}
-        >
-          추가
-        </Button>
-      </Stack>
-
-      {(error || formError) && (
+      {error && (
         <Alert severity="error" sx={{ borderRadius: 0 }}>
-          {formError ?? error}
+          {error}
         </Alert>
       )}
 
@@ -182,15 +153,31 @@ export default function ForwardingList() {
                 <ArrowForwardIcon fontSize="small" sx={{ color: "text.disabled", flexShrink: 0 }} />
                 <AddressLabel email={f.destination} name={f.destinationName} />
               </Stack>
-              <Tooltip title="삭제">
-                <IconButton size="small" onClick={() => remove(f.source, f.destination)} disabled={pending}>
-                  <DeleteOutlineIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
+              <Stack direction="row" spacing={0.5} flexShrink={0}>
+                <Tooltip title="수정">
+                  <IconButton size="small" onClick={() => openEdit(f)}>
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="삭제">
+                  <IconButton size="small" onClick={() => handleDelete(f)}>
+                    <DeleteOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
             </Stack>
           ))
         )}
       </Box>
+
+      <ForwardingFormDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        editing={editing}
+        onSubmit={(source, destination) =>
+          editing ? update(editing.source, editing.destination, source, destination) : add(source, destination)
+        }
+      />
     </Box>
   );
 }

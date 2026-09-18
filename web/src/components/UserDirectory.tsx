@@ -1,20 +1,28 @@
 import { useMemo, useState } from "react";
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import IconButton from "@mui/material/IconButton";
 import InputAdornment from "@mui/material/InputAdornment";
 import Stack from "@mui/material/Stack";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import AddIcon from "@mui/icons-material/Add";
 import SearchIcon from "@mui/icons-material/Search";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import { monoFont } from "../theme";
 import { useUsers } from "../useUsers";
 import { copyToClipboard } from "../clipboard";
+import UserFormDialog from "./UserFormDialog";
+import type { DirectoryUser } from "../types";
+
+const GRID_COLS = { xs: "1fr", sm: "1.4fr 1fr 1fr auto" };
 
 // Rendered in place of an actual password so the column has a consistent
 // width regardless of the real value's length, and never leaks the length
@@ -22,13 +30,15 @@ import { copyToClipboard } from "../clipboard";
 const MASK = "••••••••";
 
 export default function UserDirectory() {
-  const { users, enabled, loading, error, refresh } = useUsers();
+  const { users, enabled, loading, error, create, update, remove, refresh } = useUsers();
   const [query, setQuery] = useState("");
   // Passwords are plaintext in this table — masked by default and revealed
   // one row at a time on click, rather than all at once, so a shoulder-surf
   // or screen-share doesn't expose the whole table just because someone
   // needed to check one password.
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<DirectoryUser | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -43,6 +53,21 @@ export default function UserDirectory() {
       else next.add(email);
       return next;
     });
+  }
+
+  function openCreate() {
+    setEditing(null);
+    setDialogOpen(true);
+  }
+
+  function openEdit(u: DirectoryUser) {
+    setEditing(u);
+    setDialogOpen(true);
+  }
+
+  async function handleDelete(u: DirectoryUser) {
+    if (!window.confirm(`이 계정을 삭제할까요?\n${u.email}`)) return;
+    await remove(u.email);
   }
 
   return (
@@ -70,7 +95,7 @@ export default function UserDirectory() {
             placeholder="이메일 또는 이름 검색"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            sx={{ width: { xs: "100%", sm: 260 } }}
+            sx={{ width: { xs: "100%", sm: 220 } }}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
@@ -84,6 +109,9 @@ export default function UserDirectory() {
               <RefreshIcon fontSize="small" />
             </IconButton>
           </Tooltip>
+          <Button size="small" variant="outlined" startIcon={<AddIcon fontSize="small" />} onClick={openCreate}>
+            새 계정
+          </Button>
         </Stack>
       </Stack>
 
@@ -112,7 +140,7 @@ export default function UserDirectory() {
             <Box
               sx={{
                 display: { xs: "none", sm: "grid" },
-                gridTemplateColumns: "1.4fr 1fr 1fr",
+                gridTemplateColumns: GRID_COLS,
                 px: 2,
                 py: 0.75,
                 borderBottom: 1,
@@ -120,7 +148,7 @@ export default function UserDirectory() {
                 color: "text.secondary",
               }}
             >
-              {["이메일", "이름", "비밀번호"].map((h) => (
+              {["이메일", "이름", "비밀번호", ""].map((h) => (
                 <Typography key={h} variant="caption" sx={{ fontWeight: 600 }}>
                   {h}
                 </Typography>
@@ -133,7 +161,7 @@ export default function UserDirectory() {
                   key={u.email}
                   sx={{
                     display: "grid",
-                    gridTemplateColumns: { xs: "1fr", sm: "1.4fr 1fr 1fr" },
+                    gridTemplateColumns: GRID_COLS,
                     gap: { xs: 0.5, sm: 2 },
                     px: 2,
                     py: 1,
@@ -168,12 +196,31 @@ export default function UserDirectory() {
                       </Tooltip>
                     )}
                   </Stack>
+                  <Stack direction="row" spacing={0.5} justifyContent={{ xs: "flex-start", sm: "flex-end" }}>
+                    <Tooltip title="수정">
+                      <IconButton size="small" onClick={() => openEdit(u)}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="삭제">
+                      <IconButton size="small" onClick={() => handleDelete(u)}>
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </Stack>
                 </Box>
               );
             })}
           </>
         )}
       </Box>
+
+      <UserFormDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        editing={editing}
+        onSubmit={(email, password, name) => (editing ? update(email, password, name) : create(email, password, name))}
+      />
     </Box>
   );
 }

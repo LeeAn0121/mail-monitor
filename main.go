@@ -907,6 +907,80 @@ func listUsers(db *sql.DB) ([]directoryUser, error) {
 	return users, rows.Err()
 }
 
+// createUser inserts a new row into `users`. Returns alreadyExists=true
+// (not an error) if email is already taken, mirroring addForwarding's
+// duplicate handling.
+func createUser(db *sql.DB, email, password, name string) (alreadyExists bool, err error) {
+	if db == nil {
+		return false, errDirectoryDisabled
+	}
+	if !emailPatternRe.MatchString(email) {
+		return false, fmt.Errorf("이메일 형식이 올바르지 않습니다: %s", email)
+	}
+	if password == "" {
+		return false, fmt.Errorf("비밀번호를 입력하세요")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE email = ?", email).Scan(&count); err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
+
+	_, err = db.ExecContext(ctx, "INSERT INTO users (email, password, name) VALUES (?, ?, ?)", email, password, name)
+	return false, err
+}
+
+// updateUser changes name and/or password for an existing user, identified
+// by email (not itself editable — changing an account's address is a
+// delete-and-recreate, not an update, since email is how every other table
+// here references it). Returns found=false if no such email exists.
+func updateUser(db *sql.DB, email, password, name string) (found bool, err error) {
+	if db == nil {
+		return false, errDirectoryDisabled
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Existence is checked separately rather than trusting UPDATE's
+	// RowsAffected — MySQL's default driver behavior reports 0 affected
+	// rows when the SET values happen to match what's already there, which
+	// would wrongly read as "no such user" on a genuine no-op edit.
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM users WHERE email = ?", email).Scan(&count); err != nil {
+		return false, err
+	}
+	if count == 0 {
+		return false, nil
+	}
+	_, err = db.ExecContext(ctx, "UPDATE users SET password = ?, name = ? WHERE email = ?", password, name, email)
+	return true, err
+}
+
+// deleteUser removes one row from `users` by email. Returns found=false if
+// no such email existed.
+func deleteUser(db *sql.DB, email string) (found bool, err error) {
+	if db == nil {
+		return false, errDirectoryDisabled
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := db.ExecContext(ctx, "DELETE FROM users WHERE email = ?", email)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // --- keymap ---
 
 type keyMap struct {
