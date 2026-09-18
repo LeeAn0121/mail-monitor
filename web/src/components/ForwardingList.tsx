@@ -21,8 +21,8 @@ import type { ForwardingEntry } from "../types";
 
 function AddressLabel({ email, name }: { email: string; name: string }) {
   return (
-    <Stack direction="row" spacing={1} alignItems="baseline" sx={{ minWidth: 0 }}>
-      <Typography sx={{ fontFamily: monoFont, fontSize: 13 }} noWrap>
+    <Stack direction="row" spacing={1} alignItems="baseline" sx={{ minWidth: 0, width: "100%" }}>
+      <Typography sx={{ fontFamily: monoFont, fontSize: 13, minWidth: 0 }} noWrap>
         {email}
       </Typography>
       {name && (
@@ -148,10 +148,14 @@ export default function ForwardingList() {
                 "&:hover": { bgcolor: "action.hover" },
               }}
             >
-              <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0, flex: 1 }}>
+              <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
                 <AddressLabel email={f.source} name={f.sourceName} />
-                <ArrowForwardIcon fontSize="small" sx={{ color: "text.disabled", flexShrink: 0 }} />
-                <AddressLabel email={f.destination} name={f.destinationName} />
+                <Stack direction="row" spacing={1} alignItems="baseline" sx={{ minWidth: 0, pl: 2.5 }}>
+                  <ArrowForwardIcon sx={{ fontSize: 14, color: "text.disabled", flexShrink: 0 }} />
+                  <Box sx={{ minWidth: 0, flex: 1 }}>
+                    <AddressLabel email={f.destination} name={f.destinationName} />
+                  </Box>
+                </Stack>
               </Stack>
               <Stack direction="row" spacing={0.5} flexShrink={0}>
                 <Tooltip title="수정">
