@@ -34,6 +34,11 @@ export interface VersionInfo {
   releasesUrl: string;
 }
 
+export interface DirectoryUser {
+  email: string;
+  name: string;
+}
+
 export interface BlockedSender {
   email: string;
   addedAt: string;

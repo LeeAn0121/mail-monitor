@@ -869,6 +869,41 @@ func (m *model) nameSuffix(email string) string {
 	return email
 }
 
+// directoryUser is one row of the `users` table, for the web dashboard's
+// "사용자 계정" browser — a read-only view onto the same table/columns
+// resolveName already queries for name lookups.
+type directoryUser struct {
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+// listUsers returns every row of the `users` table, sorted by name — used
+// only by the web dashboard's account browser. Returns an empty slice
+// (no error) when db is nil, since that just means the optional directory
+// feature isn't configured.
+func listUsers(db *sql.DB) ([]directoryUser, error) {
+	if db == nil {
+		return []directoryUser{}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, "SELECT email, name FROM users ORDER BY name, email")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	users := []directoryUser{}
+	for rows.Next() {
+		var u directoryUser
+		if err := rows.Scan(&u.Email, &u.Name); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 // --- keymap ---
 
 type keyMap struct {

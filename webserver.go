@@ -297,6 +297,21 @@ func startWebServer(addr string, state *webState, hub *sseHub, db *sql.DB) {
 		json.NewEncoder(w).Encode(map[string]any{"events": events})
 	})
 
+	// /api/users lists the `users` directory table (email, name) — read-only
+	// browser for the same table resolveName already queries to attach
+	// display names to addresses elsewhere in the dashboard. Empty (not an
+	// error) when MAIL_MONITOR_DB_DSN isn't configured.
+	mux.HandleFunc("/api/users", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		users, err := listUsers(db)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"users": users, "enabled": db != nil})
+	})
+
 	// /api/blocklist manages /etc/postfix/header_checks REJECT rules — the
 	// same file and line format /usr/local/bin/block-sender uses, so either
 	// one sees what the other added.

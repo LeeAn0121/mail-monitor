@@ -9,4 +9,5 @@ mail-monitor
 # build overwrites it with the real bundle, which stays untracked.
 web/node_modules/
 web/dist/assets/
+web/dist/favicon.svg
 web/*.tsbuildinfo

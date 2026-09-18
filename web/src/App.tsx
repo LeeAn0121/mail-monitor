@@ -7,6 +7,7 @@ import Alert from "@mui/material/Alert";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import BlockList from "./components/BlockList";
+import UserDirectory from "./components/UserDirectory";
 import LogTable from "./components/LogTable";
 import NavRail from "./components/NavRail";
 import type { View } from "./components/NavRail";
@@ -195,6 +196,12 @@ export default function App() {
           {view === "block" && (
             <Box sx={{ display: "flex", flex: 1, minHeight: 0 }}>
               <BlockList blocklist={blocklist} />
+            </Box>
+          )}
+
+          {view === "users" && (
+            <Box sx={{ display: "flex", flex: 1, minHeight: 0 }}>
+              <UserDirectory />
             </Box>
           )}
         </Box>
